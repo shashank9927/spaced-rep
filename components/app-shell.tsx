@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, BookOpenText, Code2, Flame, LayoutDashboard, Search, Settings, ShieldCheck, X } from "lucide-react";
+import { BarChart3, BookOpenText, Code2, Flame, LayoutDashboard, Moon, Search, Settings, ShieldCheck, Sun, X } from "lucide-react";
 import { useEffect, useState, useTransition } from "react";
 import { searchCatalog } from "@/lib/actions";
 import { cn } from "@/lib/utils";
@@ -15,13 +15,36 @@ const navigation = [
 ];
 
 type ShellProfile = { display_name: string; email: string; role: string };
+type Theme = "light" | "dark";
+
+function ThemeButton({ theme, onToggle, compact = false }: { theme: Theme; onToggle: () => void; compact?: boolean }) {
+  const nextLabel = theme === "dark" ? "light" : "dark";
+  return <button className={cn("theme-toggle", compact && "theme-toggle-compact")} type="button" onClick={onToggle} aria-label={`Switch to ${nextLabel} mode`} title={`Switch to ${nextLabel} mode`}><span aria-hidden="true">{theme === "dark" ? <Sun size={compact ? 18 : 17} /> : <Moon size={compact ? 18 : 17} />}</span><span>{compact ? "" : theme === "dark" ? "Light mode" : "Dark mode"}</span></button>;
+}
 
 export function AppShell({ children, profile, streak }: { children: React.ReactNode; profile: ShellProfile; streak?: number }) {
   const pathname = usePathname();
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Array<{ type: "problem" | "pattern"; title: string; subtitle: string; href: string }>>([]);
   const [pending, startTransition] = useTransition();
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem("recallcode-theme");
+    const nextTheme = stored === "dark" || stored === "light"
+      ? stored
+      : document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+    window.setTimeout(() => setTheme(nextTheme), 0);
+    document.documentElement.dataset.theme = nextTheme;
+  }, []);
+
+  function toggleTheme() {
+    const nextTheme = theme === "dark" ? "light" : "dark";
+    setTheme(nextTheme);
+    document.documentElement.dataset.theme = nextTheme;
+    window.localStorage.setItem("recallcode-theme", nextTheme);
+  }
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -42,9 +65,9 @@ export function AppShell({ children, profile, streak }: { children: React.ReactN
   }
 
   const initials = profile.display_name.slice(0, 1).toUpperCase();
-  return <div className="app-frame light-app">
+  return <div className="app-frame">
     <aside className="app-sidebar">
-      <Link href="/dashboard" className="brand" aria-label="RecallCode home"><span className="brand-mark"><Code2 size={20} /></span><span>RecallCode</span></Link>
+      <div className="sidebar-brand-row"><Link href="/dashboard" className="brand" aria-label="RecallCode home"><span className="brand-mark"><Code2 size={20} /></span><span>RecallCode</span></Link><ThemeButton theme={theme} onToggle={toggleTheme} compact /></div>
       <nav className="sidebar-nav" aria-label="Main navigation">
         {navigation.map(({ href, label, icon: Icon }) => <Link className={cn("sidebar-link", pathname === href && "is-active")} href={href} key={href}><Icon size={20} />{label}</Link>)}
       </nav>
@@ -56,7 +79,7 @@ export function AppShell({ children, profile, streak }: { children: React.ReactN
       </div>
     </aside>
     <div className="app-main">
-      <header className="mobile-header"><Link href="/dashboard" className="brand"><span className="brand-mark"><Code2 size={18} /></span><span>RecallCode</span></Link><button className="search-trigger" onClick={() => setSearchOpen(true)} aria-label="Search problems and patterns"><Search size={19} /></button></header>
+      <header className="mobile-header"><Link href="/dashboard" className="brand"><span className="brand-mark"><Code2 size={18} /></span><span>RecallCode</span></Link><div className="mobile-header-actions"><ThemeButton theme={theme} onToggle={toggleTheme} compact /><button className="search-trigger" onClick={() => setSearchOpen(true)} aria-label="Search problems and patterns"><Search size={19} /></button></div></header>
       <main className="main-content">{children}</main>
     </div>
     <nav className="mobile-nav" aria-label="Main navigation">
