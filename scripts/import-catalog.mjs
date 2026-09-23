@@ -19,17 +19,27 @@ async function assert(step, request) {
   return result.data;
 }
 
-console.log(`Connecting to ${new URL(url).host} with ${serviceKey.slice(0, 12)}…`);
+const sourceIds = snapshot.problems.map((problem) => problem.sourceId);
+if (new Set(sourceIds).size !== sourceIds.length) throw new Error("Catalog snapshot contains duplicate source IDs.");
+const memberships = (slug) => snapshot.problems.filter((problem) => problem.catalogs.includes(slug));
+if (memberships("neetcode150").length !== 150) throw new Error("Catalog snapshot must contain exactly 150 NeetCode 150 memberships.");
+if (memberships("neetcode250").length !== 250) throw new Error("Catalog snapshot must contain exactly 250 NeetCode 250 memberships.");
+
+console.log(`Connecting to ${new URL(url).host}…`);
 await assert("Saving the catalog snapshot", supabase.from("catalog_snapshots").upsert({ version: snapshot.version, source: snapshot.source, source_url: snapshot.sourceUrl, problem_count: snapshot.problems.length }, { onConflict: "version" }));
 const payload = snapshot.problems.map((problem) => ({ source_id: problem.sourceId, slug: problem.slug, title: problem.title, difficulty: problem.difficulty, leetcode_url: problem.leetcodeUrl, neetcode_url: problem.neetcodeUrl, metadata_version: snapshot.version, is_active: true }));
 for (const [index, chunk] of chunks(payload).entries()) await assert(`Importing problem batch ${index + 1}`, supabase.from("problems").upsert(chunk, { onConflict: "source_id" }));
 const problemRows = [];
-for (const [index, chunk] of chunks(payload, 100).entries()) {
-  const rows = await assert(`Reading imported problem IDs batch ${index + 1}`, supabase.from("problems").select("id,source_id").in("source_id", chunk.map((problem) => problem.source_id)));
+for (let from = 0; ; from += 500) {
+  const rows = await assert(`Reading imported problem IDs starting at ${from + 1}`, supabase.from("problems").select("id,source_id").eq("metadata_version", snapshot.version).order("source_id").range(from, from + 499));
   problemRows.push(...rows);
+  if (rows.length < 500) break;
 }
 const rows = problemRows;
 const problemId = new Map(rows.map((row) => [row.source_id, row.id]));
+if (problemId.size !== payload.length || payload.some((problem) => !problemId.has(problem.source_id))) {
+  throw new Error(`Imported problem ID validation failed. Expected ${payload.length}, found ${problemId.size}.`);
+}
 
 const topicNames = [...new Set(snapshot.problems.flatMap((problem) => problem.topics))];
 if (topicNames.length) {
@@ -44,7 +54,7 @@ const catalogs = [["neetcode150", "NeetCode 150", "The core interview-practice l
 for (const [slug, name, description] of catalogs) {
   await assert(`Saving ${slug}`, supabase.from("catalogs").upsert({ slug, name, description, snapshot_version: snapshot.version, updated_at: new Date().toISOString() }, { onConflict: "slug" }));
   await assert(`Clearing old ${slug} membership`, supabase.from("catalog_problems").delete().eq("catalog_slug", slug));
-  const memberships = snapshot.problems.filter((problem) => problem.catalogs.includes(slug)).map((problem, sort_order) => ({ catalog_slug: slug, problem_id: problemId.get(problem.sourceId), sort_order })).filter((row) => row.problem_id);
-  for (const [index, chunk] of chunks(memberships).entries()) await assert(`Importing ${slug} membership batch ${index + 1}`, supabase.from("catalog_problems").insert(chunk));
+  const catalogMemberships = memberships(slug).map((problem, sort_order) => ({ catalog_slug: slug, problem_id: problemId.get(problem.sourceId), sort_order })).filter((row) => row.problem_id);
+  for (const [index, chunk] of chunks(catalogMemberships).entries()) await assert(`Importing ${slug} membership batch ${index + 1}`, supabase.from("catalog_problems").insert(chunk));
 }
 console.log(`Imported ${snapshot.problems.length} problems from ${snapshot.version}.`);

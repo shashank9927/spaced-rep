@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ArrowUpRight, CheckCheck, ChevronLeft, ChevronRight, Clock3, Lightbulb } from "lucide-react";
 import { ReviewRatingForm } from "@/components/review-rating-form";
@@ -13,7 +14,7 @@ export function ReviewClient({ initialQueue, optionsByProblem }: { initialQueue:
   const completed = initialQueue.length - queue.length;
   const progress = initialQueue.length ? Math.round((completed / initialQueue.length) * 100) : 100;
   const topics = useMemo(() => current?.topics.join(" · "), [current]);
-  if (!current) return <section className="review-finish"><CheckCheck size={42} /><span className="eyebrow">Queue clear</span><h1>Nothing else is due right now.</h1><p>Nice work. Your next review will surface here automatically when it is due.</p><a className="primary-button" href="/catalog">Explore the catalog</a></section>;
+  if (!current) return <section className="review-finish"><CheckCheck size={42} /><span className="eyebrow">Queue clear</span><h1>Nothing else is due right now.</h1><p>Nice work. Your next review will surface here automatically when it is due.</p><Link className="primary-button" href="/problems">Explore problems</Link></section>;
   function complete() {
     setQueue((items) => items.filter((item) => item.id !== current.id));
     setIndex(0);

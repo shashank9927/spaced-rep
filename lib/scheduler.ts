@@ -80,3 +80,7 @@ export function cardStateForDatabase(card: Card) {
     last_review_at: card.last_review?.toISOString() ?? null,
   };
 }
+
+export function retrievability(card: FsrsCardState, now = new Date()): number {
+  return scheduler.get_retrievability(toFsrsCard(card), now, false);
+}

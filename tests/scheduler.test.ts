@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { intervalLabel, ratingOptions, scheduleCard } from "@/lib/scheduler";
+import { intervalLabel, ratingOptions, retrievability, scheduleCard } from "@/lib/scheduler";
 import type { FsrsCardState } from "@/lib/types";
 
 const now = new Date("2026-09-23T10:00:00.000Z");
@@ -31,5 +31,16 @@ describe("FSRS review scheduling", () => {
   it("formats short and long review intervals", () => {
     expect(intervalLabel(now, new Date("2026-09-23T10:10:00.000Z"))).toBe("10m");
     expect(intervalLabel(now, new Date("2026-09-26T10:00:00.000Z"))).toBe("3d");
+  });
+
+  it("returns an FSRS recall estimate for a saved card", () => {
+    const next = scheduleCard(null, "good", now).next;
+    const saved: FsrsCardState = {
+      due: next.due.toISOString(), stability: next.stability, difficulty: next.difficulty,
+      elapsed_days: next.elapsed_days, scheduled_days: next.scheduled_days,
+      learning_steps: next.learning_steps, reps: next.reps, lapses: next.lapses,
+      state: next.state, last_review: next.last_review?.toISOString(),
+    };
+    expect(retrievability(saved, now)).toBeGreaterThan(0);
   });
 });

@@ -16,7 +16,7 @@ export const CATALOGS: Record<CatalogId, { name: string; description: string }> 
 };
 
 export const RATING_COPY: Record<ReviewRating, { label: string; detail: string; key: string }> = {
-  again: { label: "Again", detail: "Could not reproduce the approach.", key: "1" },
+  again: { label: "Forgot", detail: "Could not reproduce the approach.", key: "1" },
   hard: { label: "Hard", detail: "Needed major hints or too much time.", key: "2" },
   good: { label: "Good", detail: "Solved independently with reasonable effort.", key: "3" },
   easy: { label: "Easy", detail: "The approach was immediately clear.", key: "4" },

@@ -1,15 +1,15 @@
 "use server";
 
-import { randomUUID } from "crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { SCHEDULER_VERSION } from "@/lib/constants";
 import { getProfile, type Profile } from "@/lib/auth";
-import { cardStateForDatabase, scheduleCard } from "@/lib/scheduler";
+import { cardStateForDatabase, retrievability, scheduleCard } from "@/lib/scheduler";
 import { createClient } from "@/lib/supabase/server";
-import { CATALOG_IDS, REVIEW_RATINGS, type FsrsCardState, type ReviewRating } from "@/lib/types";
+import { CATALOG_IDS, PATTERN_RECALLS, REVIEW_RATINGS, type FsrsCardState, type ReviewRating, type SubmitReviewInput } from "@/lib/types";
 
-type ActionResult = { ok: true; message?: string; nextDue?: string } | { ok: false; error: string };
+export type ActionResult = { ok: true; message?: string; nextDue?: string } | { ok: false; error: string };
+export type ReviewActionResult = { ok: true; nextDue: string; previousIntervalDays: number; newIntervalDays: number; previousRetrievability: number | null; newRetrievability: number } | { ok: false; error: string };
 
 async function activeProfile(): Promise<Profile> {
   const profile = await getProfile();
@@ -53,7 +53,9 @@ const reviewSchema = z.object({
   problemId: z.string().uuid(),
   rating: z.enum(REVIEW_RATINGS),
   note: z.string().trim().max(2000).optional().default(""),
-  requestId: z.string().uuid().optional(),
+  durationMinutes: z.number().int().min(1).max(300).optional(),
+  patternRecall: z.enum(PATTERN_RECALLS).optional(),
+  requestId: z.string().uuid(),
 });
 
 function dbCard(row: any): FsrsCardState {
@@ -71,7 +73,7 @@ function dbCard(row: any): FsrsCardState {
   };
 }
 
-export async function submitReview(input: z.infer<typeof reviewSchema>): Promise<ActionResult> {
+export async function submitReview(input: SubmitReviewInput): Promise<ReviewActionResult> {
   const parsed = reviewSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "The review data is invalid. Refresh and try again." };
   const profile = await activeProfile();
@@ -88,12 +90,27 @@ export async function submitReview(input: z.infer<typeof reviewSchema>): Promise
   const current = row ? dbCard(row) : null;
   const scheduled = scheduleCard(current, parsed.data.rating as ReviewRating, now);
   const next = cardStateForDatabase(scheduled.next);
+  const previousRetrievability = current ? retrievability(current, now) : null;
+  const newRetrievability = retrievability({
+    due: next.due_at,
+    stability: next.stability,
+    difficulty: next.difficulty,
+    elapsed_days: next.elapsed_days,
+    scheduled_days: next.scheduled_days,
+    learning_steps: next.learning_steps,
+    reps: next.reps,
+    lapses: next.lapses,
+    state: next.state,
+    last_review: next.last_review_at,
+  }, now);
   const { error } = await supabase.rpc("submit_review", {
     p_problem_id: parsed.data.problemId,
-    p_request_id: parsed.data.requestId ?? randomUUID(),
+    p_request_id: parsed.data.requestId,
     p_rating: parsed.data.rating,
     p_reviewed_at: now.toISOString(),
     p_note: parsed.data.note,
+    p_duration_minutes: parsed.data.durationMinutes ?? null,
+    p_pattern_recall: parsed.data.patternRecall ?? null,
     p_scheduler_version: SCHEDULER_VERSION,
     p_previous_due_at: row?.due_at ?? null,
     p_next_due_at: next.due_at,
@@ -116,9 +133,65 @@ export async function submitReview(input: z.infer<typeof reviewSchema>): Promise
 
   revalidatePath("/dashboard");
   revalidatePath("/catalog");
+  revalidatePath("/problems");
+  revalidatePath(`/problems/${parsed.data.problemId}`);
   revalidatePath("/review");
   revalidatePath("/history");
-  return { ok: true, nextDue: next.due_at };
+  revalidatePath("/patterns");
+  revalidatePath("/progress");
+  return {
+    ok: true,
+    nextDue: next.due_at,
+    previousIntervalDays: row?.scheduled_days ?? 0,
+    newIntervalDays: next.scheduled_days,
+    previousRetrievability,
+    newRetrievability,
+  };
+}
+
+export async function saveSettings(input: { displayName: string; timezone: string; selectedCatalog: string }): Promise<ActionResult> {
+  const parsed = z.object({
+    displayName: z.string().trim().min(2).max(60),
+    timezone: z.string().trim().min(1).max(80),
+    selectedCatalog: z.enum(CATALOG_IDS),
+  }).safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Enter a name, timezone, and valid study list." };
+  const profile = await activeProfile();
+  const supabase = await createClient();
+  const { error } = await supabase.from("profiles").update({
+    display_name: parsed.data.displayName,
+    timezone: parsed.data.timezone,
+    selected_catalog: parsed.data.selectedCatalog,
+  }).eq("id", profile.id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/dashboard");
+  revalidatePath("/problems");
+  revalidatePath("/settings");
+  return { ok: true, message: "Settings saved." };
+}
+
+export async function searchCatalog(query: string): Promise<Array<{ type: "problem" | "pattern"; title: string; subtitle: string; href: string }>> {
+  const parsed = z.string().trim().min(1).max(80).safeParse(query);
+  if (!parsed.success) return [];
+  const profile = await activeProfile();
+  const supabase = await createClient();
+  const text = parsed.data.replace(/[%_]/g, "");
+  const [problems, topics] = await Promise.all([
+    supabase.from("problems")
+      .select("id,title,difficulty,catalog_problems!inner(catalog_slug)")
+      .eq("catalog_problems.catalog_slug", profile.selected_catalog)
+      .ilike("title", `%${text}%`)
+      .limit(8),
+    supabase.from("topics").select("name").ilike("name", `%${text}%`).limit(4),
+  ]);
+  const matches: Array<{ type: "problem" | "pattern"; title: string; subtitle: string; href: string }> = [];
+  for (const problem of problems.data ?? []) {
+    if (problem?.id) matches.push({ type: "problem", title: problem.title, subtitle: problem.difficulty, href: `/problems/${problem.id}` });
+  }
+  for (const topic of topics.data ?? []) {
+    if (topic?.name) matches.push({ type: "pattern", title: topic.name, subtitle: "Pattern", href: `/patterns?topic=${encodeURIComponent(topic.name)}` });
+  }
+  return matches;
 }
 
 export async function inviteUser(email: string): Promise<ActionResult> {

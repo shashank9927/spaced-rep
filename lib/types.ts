@@ -4,6 +4,9 @@ export type CatalogId = (typeof CATALOG_IDS)[number];
 export const REVIEW_RATINGS = ["again", "hard", "good", "easy"] as const;
 export type ReviewRating = (typeof REVIEW_RATINGS)[number];
 
+export const PATTERN_RECALLS = ["no", "partial", "yes"] as const;
+export type PatternRecall = (typeof PATTERN_RECALLS)[number];
+
 export type ProblemDifficulty = "Easy" | "Medium" | "Hard";
 export type ProblemStatus = "new" | "active" | "due";
 
@@ -37,6 +40,12 @@ export interface CatalogProblem extends ProblemSummary {
     due_at: string;
     reps: number;
     last_review_at: string | null;
+    stability?: number;
+    lapses?: number;
+    scheduled_days?: number;
+    first_solved_at?: string;
+    retrievability?: number;
+    latest_rating?: ReviewRating | null;
   } | null;
 }
 
@@ -46,6 +55,10 @@ export interface DueProblem extends ProblemSummary {
     version: number;
     first_solved_at: string;
   };
+  retrievability?: number;
+  latest_rating?: ReviewRating | null;
+  latest_note?: string | null;
+  latest_reviewed_at?: string | null;
 }
 
 export interface RatingOption {
@@ -53,4 +66,27 @@ export interface RatingOption {
   label: string;
   detail: string;
   intervalLabel: string;
+}
+
+export interface ReviewLogSummary {
+  id: string;
+  problem_id: string;
+  rating: ReviewRating;
+  reviewed_at: string;
+  note: string | null;
+  duration_minutes: number | null;
+  pattern_recall: PatternRecall | null;
+  previous_due_at: string | null;
+  next_due_at: string;
+  scheduled_days: number;
+  problems?: { title: string; difficulty: ProblemDifficulty } | null;
+}
+
+export interface SubmitReviewInput {
+  problemId: string;
+  rating: ReviewRating;
+  durationMinutes?: number;
+  patternRecall?: PatternRecall;
+  note?: string;
+  requestId: string;
 }

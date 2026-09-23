@@ -4,7 +4,7 @@ A small, invite-only spaced-repetition tracker for NeetCode practice problems.
 
 ## Run locally
 
-1. Create a Supabase project, then apply `supabase/migrations/0001_initial.sql` in its SQL editor or through the Supabase CLI.
+1. Create a Supabase project, then apply the migrations in order: `supabase/migrations/0001_initial.sql`, followed by `supabase/migrations/0002_review_details.sql`.
 2. Create a Google OAuth Web client. Add `https://<your-project-ref>.supabase.co/auth/v1/callback` as its authorized redirect URI, then put its client ID and secret in Supabase under Authentication > Providers > Google.
 3. Copy `.env.example` to `.env.local` and fill in the values. Use a lowercase value for `BOOTSTRAP_ADMIN_EMAIL`.
 4. In Supabase Authentication > URL Configuration, add `http://localhost:3000/auth/callback` and the production callback URL.
@@ -12,6 +12,10 @@ A small, invite-only spaced-repetition tracker for NeetCode practice problems.
 6. Start the app with `npm run dev` and sign in using `BOOTSTRAP_ADMIN_EMAIL`; that account becomes the first administrator automatically.
 
 Google users are only granted access after their email exists in `allowed_emails`. The address in `BOOTSTRAP_ADMIN_EMAIL` becomes the first administrator when it signs in.
+
+## Checks
+
+Run `npm run lint`, `npm test`, and `npm run build` before deploying. The review-details migration is additive, so it preserves cards and existing review history while enabling time-spent and pattern-recall fields.
 
 ## Deploy
 

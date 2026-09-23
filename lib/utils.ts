@@ -25,6 +25,18 @@ export function formatRelativeDue(value: string | Date): string {
   return diff <= 0 ? `${days}d overdue` : `due in ${days}d`;
 }
 
+export function formatDate(value: string | Date, timeZone?: string): string {
+  return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric", timeZone }).format(new Date(value));
+}
+
+export function formatDuration(minutes: number | null | undefined): string {
+  if (!minutes) return "—";
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+}
+
 export function displayNameFromEmail(email: string): string {
   return email.split("@")[0].replace(/[._-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
