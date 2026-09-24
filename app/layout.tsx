@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import Script from "next/script";
 import "@fontsource-variable/inter";
 import { GeistMono } from "geist/font/mono";
@@ -11,6 +12,7 @@ export const metadata: Metadata = {
   icons: { icon: "/favicon.svg" },
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable}`} data-theme="dark" suppressHydrationWarning><head><Script id="recallcode-theme-init" strategy="beforeInteractive">{`(function(){try{var t=localStorage.getItem("recallcode-theme");document.documentElement.dataset.theme=t==="dark"||t==="light"?t:"dark"}catch(e){document.documentElement.dataset.theme="dark"}})()`}</Script></head><body>{children}</body></html>;
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
+  return <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable}`} data-theme="dark" suppressHydrationWarning><head><Script id="recallcode-theme-init" nonce={nonce} strategy="beforeInteractive">{`(function(){try{var t=localStorage.getItem("recallcode-theme");document.documentElement.dataset.theme=t==="dark"||t==="light"?t:"dark"}catch(e){document.documentElement.dataset.theme="dark"}})()`}</Script></head><body>{children}</body></html>;
 }

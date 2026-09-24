@@ -1,10 +1,14 @@
+import "server-only";
+
 import { cache } from "react";
+import { z } from "zod";
 import { activityForDays, patternStats, queueOrder, reviewStats, type StudyCard } from "@/lib/analytics";
 import { getProfile, type Profile } from "@/lib/auth";
 import { buildScheduleData, isDueOnOrBeforeLocalDay } from "@/lib/study-plan";
 import { retrievability } from "@/lib/scheduler";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient, createClient } from "@/lib/supabase/server";
 import { leetcodeNumberFromSourceId } from "@/lib/utils";
+import { isAllowedExternalUrl } from "@/lib/security";
 import type { CatalogProblem, DueProblem, FsrsCardState, ProblemSummary, ReviewLogSummary, ReviewRating } from "@/lib/types";
 
 const CARD_SELECT = "due_at,stability,difficulty,elapsed_days,scheduled_days,learning_steps,reps,lapses,state,last_review_at,last_rating,version,first_attempted_at,problems(id,source_id,leetcode_number,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(topics(name)))";
@@ -18,6 +22,16 @@ function topicsFrom(value: unknown): string[] {
   });
 }
 
+function approvedLink(value: unknown, host: string) {
+  if (typeof value !== "string" || !isAllowedExternalUrl(value)) return null;
+  try {
+    const hostname = new URL(value).hostname;
+    return hostname === host || hostname.endsWith(`.${host}`) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 function toProblem(value: any): ProblemSummary {
   return {
     id: value.id,
@@ -26,8 +40,8 @@ function toProblem(value: any): ProblemSummary {
     slug: value.slug,
     title: value.title,
     difficulty: value.difficulty,
-    leetcode_url: value.leetcode_url,
-    neetcode_url: value.neetcode_url,
+    leetcode_url: approvedLink(value.leetcode_url, "leetcode.com"),
+    neetcode_url: approvedLink(value.neetcode_url, "neetcode.io"),
     topics: topicsFrom(value.problem_topics),
   };
 }
@@ -201,6 +215,7 @@ export async function getScheduleData(month: string) {
 }
 
 export async function getProblemDetail(problemId: string) {
+  if (!z.string().uuid().safeParse(problemId).success) return null;
   const supabase = await createClient();
   const [problemResult, snapshot, logs] = await Promise.all([
     supabase.from("problems").select("id,source_id,leetcode_number,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(topics(name))").eq("id", problemId).maybeSingle(),
@@ -240,7 +255,9 @@ export async function getReviewHistory() {
 }
 
 export async function getAdminData() {
-  const supabase = await createClient();
+  const profile = await getProfile();
+  if (!profile || profile.role !== "admin" || !profile.is_active) return { invites: [], snapshots: [] };
+  const supabase = createAdminClient();
   const [invites, snapshots] = await Promise.all([
     supabase.from("allowed_emails").select("email,invited_at,claimed_at,is_active").order("invited_at", { ascending: false }),
     supabase.from("catalog_snapshots").select("version,imported_at,problem_count,source_url").order("imported_at", { ascending: false }).limit(6),

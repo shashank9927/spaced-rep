@@ -5,9 +5,10 @@ import { z } from "zod";
 import { SCHEDULER_VERSION } from "@/lib/constants";
 import { getProfile, type Profile } from "@/lib/auth";
 import { cardStateForDatabase, retrievability, scheduleCard } from "@/lib/scheduler";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient, createClient } from "@/lib/supabase/server";
 import { leetcodeNumberFromSourceId } from "@/lib/utils";
 import { CATALOG_IDS, REVIEW_RATINGS, type FsrsCardState, type ReviewRating, type SubmitReviewInput } from "@/lib/types";
+import { safeErrorMessage, safeNoteSchema, timezoneSchema } from "@/lib/security";
 
 export type ActionResult = { ok: true; message?: string; nextDue?: string } | { ok: false; error: string };
 export type ReviewActionResult = {
@@ -26,34 +27,47 @@ async function activeProfile(): Promise<Profile> {
   return profile;
 }
 
-export async function saveOnboarding(input: { displayName: string; timezone: string; selectedCatalog: string }): Promise<ActionResult> {
-  const parsed = z.object({
-    displayName: z.string().trim().min(2).max(60),
-    timezone: z.string().trim().min(1).max(80),
-    selectedCatalog: z.enum(CATALOG_IDS),
-  }).safeParse(input);
-  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Please enter a name and select a valid study list." };
+const profileSettingsSchema = z.object({
+  displayName: z.string().trim().min(2).max(60),
+  timezone: timezoneSchema,
+  selectedCatalog: z.enum(CATALOG_IDS),
+});
 
-  const profile = await activeProfile();
-  const supabase = await createClient();
-  const { error } = await supabase.from("profiles").update({
-    display_name: parsed.data.displayName,
-    timezone: parsed.data.timezone,
-    selected_catalog: parsed.data.selectedCatalog,
-    onboarding_completed_at: new Date().toISOString(),
-  }).eq("id", profile.id);
-  if (error) return { ok: false, error: error.message };
-  revalidatePath("/today");
-  return { ok: true };
+async function saveProfileSettings(profile: Profile, input: z.infer<typeof profileSettingsSchema>, onboardingCompleted: boolean) {
+  const admin = createAdminClient();
+  return admin.rpc("save_profile_settings_internal", {
+    p_user_id: profile.id,
+    p_display_name: input.displayName,
+    p_timezone: input.timezone,
+    p_selected_catalog: input.selectedCatalog,
+    p_onboarding_completed: onboardingCompleted,
+  });
+}
+
+export async function saveOnboarding(input: { displayName: string; timezone: string; selectedCatalog: string }): Promise<ActionResult> {
+  const parsed = profileSettingsSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Please enter a name and select a valid study list." };
+  try {
+    const profile = await activeProfile();
+    const { error } = await saveProfileSettings(profile, parsed.data, true);
+    if (error) return { ok: false, error: safeErrorMessage(error, "We could not save onboarding. Please try again.") };
+    revalidatePath("/today");
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: safeErrorMessage(error, "We could not save onboarding. Please try again.") };
+  }
 }
 
 export async function setActiveCatalog(selectedCatalog: string): Promise<ActionResult> {
   const catalog = z.enum(CATALOG_IDS).safeParse(selectedCatalog);
   if (!catalog.success) return { ok: false, error: "Unknown catalog." };
-  const profile = await activeProfile();
-  const supabase = await createClient();
-  const { error } = await supabase.from("profiles").update({ selected_catalog: catalog.data }).eq("id", profile.id);
-  if (error) return { ok: false, error: error.message };
+  try {
+    const profile = await activeProfile();
+    const { error } = await saveProfileSettings(profile, { displayName: profile.display_name ?? "RecallCode user", timezone: profile.timezone, selectedCatalog: catalog.data }, Boolean(profile.display_name));
+    if (error) return { ok: false, error: safeErrorMessage(error, "We could not change the catalog.") };
+  } catch (error) {
+    return { ok: false, error: safeErrorMessage(error, "We could not change the catalog.") };
+  }
   revalidatePath("/catalog");
   revalidatePath("/problems");
   revalidatePath("/today");
@@ -64,7 +78,7 @@ export async function setActiveCatalog(selectedCatalog: string): Promise<ActionR
 const reviewSchema = z.object({
   problemId: z.string().uuid(),
   rating: z.enum(REVIEW_RATINGS),
-  note: z.string().trim().max(2000).optional().default(""),
+    note: safeNoteSchema,
   requestId: z.string().uuid(),
 });
 
@@ -86,35 +100,39 @@ function dbCard(row: any): FsrsCardState {
 export async function submitReview(input: SubmitReviewInput): Promise<ReviewActionResult> {
   const parsed = reviewSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "The review data is invalid. Refresh and try again." };
-  const profile = await activeProfile();
-  const supabase = await createClient();
-  const { data: existingLog, error: existingLogError } = await supabase
-    .from("review_logs")
-    .select("next_due_at,scheduled_days")
-    .eq("user_id", profile.id)
-    .eq("request_id", parsed.data.requestId)
-    .maybeSingle();
-  if (existingLogError) return { ok: false, error: existingLogError.message };
-  if (existingLog) {
-    const { data: existingCard, error: existingCardError } = await supabase.from("user_problem_cards").select("*").eq("user_id", profile.id).eq("problem_id", parsed.data.problemId).maybeSingle();
-    if (existingCardError || !existingCard) return { ok: false, error: existingCardError?.message ?? "Your saved review could not be reconciled. Refresh and try again." };
-    return {
-      ok: true,
-      nextDue: existingLog.next_due_at,
-      previousIntervalDays: 0,
-      newIntervalDays: existingLog.scheduled_days,
-      previousRetrievability: null,
-      newRetrievability: retrievability(dbCard(existingCard), new Date()),
-      updatedCard: { problemId: parsed.data.problemId, dueAt: existingLog.next_due_at, stability: Number(existingCard.stability), lapses: existingCard.lapses, repetitions: existingCard.reps, scheduledDays: existingLog.scheduled_days, firstAttemptedAt: existingCard.first_attempted_at },
-    };
-  }
-  const { data: row, error: cardError } = await supabase
-    .from("user_problem_cards")
-    .select("*")
-    .eq("user_id", profile.id)
-    .eq("problem_id", parsed.data.problemId)
-    .maybeSingle();
-  if (cardError) return { ok: false, error: cardError.message };
+  try {
+    const profile = await activeProfile();
+    const supabase = await createClient();
+    const { data: existingLog, error: existingLogError } = await supabase
+      .from("review_logs")
+      .select("problem_id,rating,next_due_at,scheduled_days")
+      .eq("user_id", profile.id)
+      .eq("request_id", parsed.data.requestId)
+      .maybeSingle();
+    if (existingLogError) return { ok: false, error: safeErrorMessage(existingLogError, "We could not verify this review. Please try again.") };
+    if (existingLog && (existingLog.problem_id !== parsed.data.problemId || existingLog.rating !== parsed.data.rating)) {
+      return { ok: false, error: "This request ID was already used for a different review." };
+    }
+    if (existingLog) {
+      const { data: existingCard, error: existingCardError } = await supabase.from("user_problem_cards").select("*").eq("user_id", profile.id).eq("problem_id", parsed.data.problemId).maybeSingle();
+      if (existingCardError || !existingCard) return { ok: false, error: "Your saved review could not be reconciled. Refresh and try again." };
+      return {
+        ok: true,
+        nextDue: existingLog.next_due_at,
+        previousIntervalDays: 0,
+        newIntervalDays: existingLog.scheduled_days,
+        previousRetrievability: null,
+        newRetrievability: retrievability(dbCard(existingCard), new Date()),
+        updatedCard: { problemId: parsed.data.problemId, dueAt: existingLog.next_due_at, stability: Number(existingCard.stability), lapses: existingCard.lapses, repetitions: existingCard.reps, scheduledDays: existingLog.scheduled_days, firstAttemptedAt: existingCard.first_attempted_at },
+      };
+    }
+    const { data: row, error: cardError } = await supabase
+      .from("user_problem_cards")
+      .select("*")
+      .eq("user_id", profile.id)
+      .eq("problem_id", parsed.data.problemId)
+      .maybeSingle();
+    if (cardError) return { ok: false, error: safeErrorMessage(cardError, "We could not load this problem. Please try again.") };
 
   const now = new Date();
   const current = row ? dbCard(row) : null;
@@ -133,7 +151,9 @@ export async function submitReview(input: SubmitReviewInput): Promise<ReviewActi
     state: next.state,
     last_review: next.last_review_at,
   }, now);
-  const { error } = await supabase.rpc("submit_review", {
+  const admin = createAdminClient();
+  const { error } = await admin.rpc("submit_review_internal", {
+    p_user_id: profile.id,
     p_problem_id: parsed.data.problemId,
     p_request_id: parsed.data.requestId,
     p_rating: parsed.data.rating,
@@ -154,17 +174,14 @@ export async function submitReview(input: SubmitReviewInput): Promise<ReviewActi
     p_first_attempted_at: row?.first_attempted_at ?? now.toISOString(),
     p_expected_version: row?.version ?? 0,
   });
-  if (error) {
-    const isStale = error.message.toLowerCase().includes("stale card");
-    return { ok: false, error: isStale ? "This problem was updated in another tab. Refresh to continue." : error.message };
-  }
+    if (error) return { ok: false, error: safeErrorMessage(error, "We could not save this review. Please try again.") };
 
   revalidatePath("/today");
   revalidatePath("/problems");
   revalidatePath(`/problems/${parsed.data.problemId}`);
   revalidatePath("/schedule");
   revalidatePath("/progress");
-  return {
+    return {
     ok: true,
     nextDue: next.due_at,
     previousIntervalDays: row?.scheduled_days ?? 0,
@@ -180,24 +197,22 @@ export async function submitReview(input: SubmitReviewInput): Promise<ReviewActi
       scheduledDays: next.scheduled_days,
       firstAttemptedAt: row?.first_attempted_at ?? now.toISOString(),
     },
-  };
+    };
+  } catch (error) {
+    return { ok: false, error: safeErrorMessage(error, "We could not save this review. Please try again.") };
+  }
 }
 
 export async function saveSettings(input: { displayName: string; timezone: string; selectedCatalog: string }): Promise<ActionResult> {
-  const parsed = z.object({
-    displayName: z.string().trim().min(2).max(60),
-    timezone: z.string().trim().min(1).max(80),
-    selectedCatalog: z.enum(CATALOG_IDS),
-  }).safeParse(input);
+  const parsed = profileSettingsSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Enter a name, timezone, and valid study list." };
-  const profile = await activeProfile();
-  const supabase = await createClient();
-  const { error } = await supabase.from("profiles").update({
-    display_name: parsed.data.displayName,
-    timezone: parsed.data.timezone,
-    selected_catalog: parsed.data.selectedCatalog,
-  }).eq("id", profile.id);
-  if (error) return { ok: false, error: error.message };
+  try {
+    const profile = await activeProfile();
+    const { error } = await saveProfileSettings(profile, parsed.data, Boolean(profile.display_name));
+    if (error) return { ok: false, error: safeErrorMessage(error, "We could not save settings.") };
+  } catch (error) {
+    return { ok: false, error: safeErrorMessage(error, "We could not save settings.") };
+  }
   revalidatePath("/today");
   revalidatePath("/problems");
   revalidatePath("/settings");
@@ -228,27 +243,38 @@ export async function getSearchIndex(): Promise<Array<{ type: "problem" | "patte
 export async function inviteUser(email: string): Promise<ActionResult> {
   const normalized = z.string().trim().email().transform((value) => value.toLowerCase()).safeParse(email);
   if (!normalized.success) return { ok: false, error: "Enter a valid email address." };
-  const profile = await activeProfile();
-  if (profile.role !== "admin") return { ok: false, error: "Only the app owner can invite people." };
-  const supabase = await createClient();
-  const { error } = await supabase.from("allowed_emails").upsert({
-    email: normalized.data,
-    invited_by: profile.id,
-    is_active: true,
-  }, { onConflict: "email" });
-  if (error) return { ok: false, error: error.message };
-  revalidatePath("/admin");
-  return { ok: true, message: `${normalized.data} can now sign in with Google.` };
+  try {
+    const profile = await activeProfile();
+    if (profile.role !== "admin") return { ok: false, error: "Only the app owner can invite people." };
+    const admin = createAdminClient();
+    const recent = await admin.from("allowed_emails").select("email", { count: "exact", head: true }).eq("invited_by", profile.id).gte("invited_at", new Date(Date.now() - 60 * 60 * 1000).toISOString());
+    if (recent.error) return { ok: false, error: safeErrorMessage(recent.error, "We could not check invitation limits.") };
+    if ((recent.count ?? 0) >= 20) return { ok: false, error: "Too many invitations were sent recently. Please wait an hour." };
+    const { error } = await admin.from("allowed_emails").upsert({
+      email: normalized.data,
+      invited_by: profile.id,
+      is_active: true,
+    }, { onConflict: "email" });
+    if (error) return { ok: false, error: safeErrorMessage(error, "We could not update the invitation.") };
+    revalidatePath("/admin");
+    return { ok: true, message: `${normalized.data} can now sign in with Google.` };
+  } catch (error) {
+    return { ok: false, error: safeErrorMessage(error, "We could not update the invitation.") };
+  }
 }
 
 export async function setUserAccess(email: string, isActive: boolean): Promise<ActionResult> {
   const parsed = z.string().trim().email().transform((value) => value.toLowerCase()).safeParse(email);
   if (!parsed.success) return { ok: false, error: "Invalid email address." };
-  const profile = await activeProfile();
-  if (profile.role !== "admin") return { ok: false, error: "Only the app owner can manage access." };
-  const supabase = await createClient();
-  const { error } = await supabase.from("allowed_emails").update({ is_active: isActive }).eq("email", parsed.data);
-  if (error) return { ok: false, error: error.message };
-  revalidatePath("/admin");
-  return { ok: true };
+  try {
+    const profile = await activeProfile();
+    if (profile.role !== "admin") return { ok: false, error: "Only the app owner can manage access." };
+    const admin = createAdminClient();
+    const { error } = await admin.from("allowed_emails").update({ is_active: isActive }).eq("email", parsed.data);
+    if (error) return { ok: false, error: safeErrorMessage(error, "We could not change access.") };
+    revalidatePath("/admin");
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: safeErrorMessage(error, "We could not change access.") };
+  }
 }

@@ -11,14 +11,16 @@ export function GoogleSignIn() {
     setError(null);
     try {
       const supabase = createClient();
-      const redirectTo = `${window.location.origin}/auth/callback`;
+      const configuredOrigin = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "");
+      const redirectTo = `${configuredOrigin || window.location.origin}/auth/callback`;
       const { error: authError } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: { redirectTo },
       });
-      if (authError) setError(authError.message);
+      if (authError) setError("Google sign-in could not be started. Please try again.");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not start Google sign-in.");
+      console.error("Google sign-in start failed", cause instanceof Error ? { name: cause.name } : undefined);
+      setError("Google sign-in could not be started. Please try again.");
     } finally {
       setLoading(false);
     }

@@ -2,7 +2,7 @@
   "source": "neetcode-public-catalog",
   "sourceUrl": "https://neetcode.io/practice/practice/neetcode150",
   "bundleUrl": "https://neetcode.io/main.f39af0c52a4e9fb5.js",
-  "generatedAt": "2026-09-24T12:59:19.037Z",
+  "generatedAt": "2026-09-24T14:05:42.369Z",
   "version": "neetcode-2026-09-24-426da304cb",
   "problems": [
     {
@@ -2975,7 +2975,7 @@
       }
     },
     {
-      "sourceId": "0214-shortest-palindrome/",
+      "sourceId": "0214-shortest-palindrome",
       "slug": "shortest-palindrome",
       "title": "Shortest Palindrome",
       "difficulty": "Hard",

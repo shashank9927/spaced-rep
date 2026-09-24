@@ -1,3 +1,5 @@
+import "server-only";
+
 import { createServerClient } from "@supabase/ssr";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
@@ -17,7 +19,13 @@ export async function createClient() {
       getAll: () => cookieStore.getAll(),
       setAll: (items) => {
         try {
-          items.forEach(({ name, value, options }) => cookieStore.set(name, value, options));
+          items.forEach(({ name, value, options }) => cookieStore.set(name, value, {
+            ...options,
+            httpOnly: true,
+            sameSite: "lax",
+            secure: process.env.NODE_ENV === "production",
+            path: "/",
+          }));
         } catch {
           // Server Components cannot set cookies; middleware or route handlers refresh them.
         }

@@ -1,13 +1,14 @@
 import dotenv from "dotenv";
 import { readFile } from "node:fs/promises";
 import { createClient } from "@supabase/supabase-js";
+import { validateCatalogSnapshot } from "./catalog-schema.mjs";
 
 dotenv.config({ path: ".env.local" });
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!url || !serviceKey) throw new Error("NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required in .env.local.");
 
-const snapshot = JSON.parse(await readFile("data/catalog.snapshot.json", "utf8"));
+const snapshot = validateCatalogSnapshot(JSON.parse(await readFile("data/catalog.snapshot.json", "utf8")));
 const supabase = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
 const chunks = (items, size = 500) => Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size));
 async function assert(step, request) {
@@ -30,6 +31,13 @@ if (new Set(leetcodeNumbers).size !== leetcodeNumbers.length) throw new Error("C
 const memberships = (slug) => snapshot.problems.filter((problem) => problem.catalogs.includes(slug));
 if (memberships("neetcode150").length !== 150) throw new Error("Catalog snapshot must contain exactly 150 NeetCode 150 memberships.");
 if (memberships("neetcode250").length !== 250) throw new Error("Catalog snapshot must contain exactly 250 NeetCode 250 memberships.");
+for (const problem of snapshot.problems) {
+  for (const value of [problem.leetcodeUrl, problem.neetcodeUrl].filter(Boolean)) {
+    const parsed = new URL(value);
+    const allowed = parsed.hostname === "leetcode.com" || parsed.hostname.endsWith(".leetcode.com") || parsed.hostname === "neetcode.io" || parsed.hostname.endsWith(".neetcode.io");
+    if (parsed.protocol !== "https:" || !allowed) throw new Error(`Catalog contains an unapproved external URL for ${problem.sourceId}.`);
+  }
+}
 
 console.log(`Connecting to ${new URL(url).host}…`);
 await assert("Saving the catalog snapshot", supabase.from("catalog_snapshots").upsert({ version: snapshot.version, source: snapshot.source, source_url: snapshot.sourceUrl, problem_count: snapshot.problems.length }, { onConflict: "version" }));

@@ -1,8 +1,62 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { parseExpressionAt } from "acorn";
+import { validateCatalogSnapshot } from "./catalog-schema.mjs";
 
 const pageUrl = "https://neetcode.io/practice/practice/neetcode150";
+const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+const FETCH_TIMEOUT_MS = 15_000;
+
+function assertNeetCodeUrl(value) {
+  const url = new URL(value);
+  if (url.protocol !== "https:" || (url.hostname !== "neetcode.io" && !url.hostname.endsWith(".neetcode.io"))) throw new Error("Catalog fetch redirected to an unapproved host.");
+  return url;
+}
+
+async function fetchText(value, label) {
+  const url = assertNeetCodeUrl(value);
+  let response;
+  try {
+    response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), headers: { accept: "text/html,application/javascript,text/javascript" } });
+  } catch (error) {
+    throw new Error(`Could not load ${label}: ${error instanceof Error ? error.message : "network error"}`);
+  }
+  if (!response.ok) throw new Error(`Could not load ${label}: HTTP ${response.status}`);
+  const declaredSize = Number(response.headers.get("content-length") ?? 0);
+  if (declaredSize > MAX_RESPONSE_BYTES) throw new Error(`${label} is larger than the allowed import size.`);
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!/(text\/html|javascript|text\/plain)/i.test(contentType)) throw new Error(`${label} returned an unexpected content type.`);
+  const text = await response.text();
+  if (Buffer.byteLength(text, "utf8") > MAX_RESPONSE_BYTES) throw new Error(`${label} is larger than the allowed import size.`);
+  return text;
+}
+
+function evaluateStatic(node) {
+  if (node.type === "Literal") {
+    if (node.regex || typeof node.value === "bigint" || (typeof node.value !== "string" && typeof node.value !== "number" && typeof node.value !== "boolean" && node.value !== null)) throw new Error("Unsupported literal.");
+    return node.value;
+  }
+  if (node.type === "ArrayExpression") return node.elements.map((element) => element ? evaluateStatic(element) : null);
+  if (node.type === "ObjectExpression") {
+    const result = {};
+    for (const property of node.properties) {
+      if (property.type !== "Property" || property.kind !== "init" || property.method || property.computed || property.shorthand || property.value.type === "SpreadElement") throw new Error("Executable object property rejected.");
+      const key = property.key.type === "Identifier" ? property.key.name : evaluateStatic(property.key);
+      if (typeof key !== "string" && typeof key !== "number") throw new Error("Invalid object key.");
+      result[String(key)] = evaluateStatic(property.value);
+    }
+    return result;
+  }
+  if (node.type === "UnaryExpression" && (node.operator === "+" || node.operator === "-" || node.operator === "!")) {
+    const value = evaluateStatic(node.argument);
+    if (node.operator === "!" && (typeof value !== "boolean" && typeof value !== "number")) throw new Error("Invalid boolean expression.");
+    if (node.operator !== "!" && typeof value !== "number") throw new Error("Invalid numeric expression.");
+    if (node.operator === "!") return !value;
+    return node.operator === "-" ? -value : value;
+  }
+  throw new Error(`Executable catalog expression rejected: ${node.type}`);
+}
 
 function objectEnd(source, start) {
   let depth = 0;
@@ -27,32 +81,29 @@ function objectEnd(source, start) {
 }
 
 function parsePublicProblemObjects(bundle) {
-  const rawObjects = [];
+  const entries = [];
   let cursor = 0;
   while (cursor < bundle.length) {
     const start = bundle.indexOf('{problem:"', cursor);
     if (start < 0) break;
     const end = objectEnd(bundle, start);
-    const raw = bundle.slice(start, end);
     cursor = end;
     try {
-      // One object literal from NeetCode's public app bundle; unrelated literals are ignored.
-      const entry = Function(`"use strict"; return (${raw});`)();
-      if (typeof entry.problem === "string" && ["Easy", "Medium", "Hard"].includes(entry.difficulty)) rawObjects.push(entry);
+      const expression = parseExpressionAt(bundle.slice(start, end), 0, { ecmaVersion: "latest" });
+      const entry = evaluateStatic(expression);
+      if (entry && typeof entry.problem === "string" && typeof entry.code === "string" && ["Easy", "Medium", "Hard"].includes(entry.difficulty)) entries.push(entry);
     } catch {
-      // The source can contain unrelated minified objects that share the key name.
+      // Unrelated literals are ignored; executable expressions never run.
     }
   }
-  return rawObjects;
+  return entries;
 }
 
 function canonicalize(entries) {
   const byId = new Map();
   for (const [index, entry] of entries.entries()) {
-    const slug = String(entry.ncLink || entry.link || entry.code || entry.problem)
-      .replace(/^\/+|\/+$/g, "")
-      .replace(/\/question$/, "");
-    const sourceId = String(entry.code || `nc-${slug}`).toLowerCase();
+    const slug = String(entry.ncLink || entry.link || entry.code || entry.problem).replace(/^\/+|\/+$/g, "").replace(/\/question$/, "");
+    const sourceId = String(entry.code).replace(/^\/+|\/+$/g, "").toLowerCase();
     const existing = byId.get(sourceId);
     const catalogs = new Set(existing?.catalogs ?? []);
     if (entry.neetcode150) catalogs.add("neetcode150");
@@ -74,30 +125,21 @@ function canonicalize(entries) {
       catalogOrder,
     });
   }
-  // The public bundle order is the official catalog order. Never sort by ID.
   return [...byId.values()];
 }
 
-const page = await fetch(pageUrl).then(async (response) => {
-  if (!response.ok) throw new Error(`Could not load NeetCode catalog page: ${response.status}`);
-  return response.text();
-});
-const mainFile = page.match(/(?:src=")([^"/]*main\.[^"]+\.js)/)?.[1];
+const page = await fetchText(pageUrl, "NeetCode catalog page");
+const mainFile = page.match(/(?:src=")(\/??[^"']*main\.[^"']+\.js)/)?.[1] ?? page.match(/(?:src=")([^"/]*main\.[^"']+\.js)/)?.[1];
 if (!mainFile) throw new Error("Could not locate the public NeetCode application bundle.");
 const bundleUrl = new URL(mainFile, "https://neetcode.io/").toString();
-const bundle = await fetch(bundleUrl).then(async (response) => {
-  if (!response.ok) throw new Error(`Could not load NeetCode bundle: ${response.status}`);
-  return response.text();
-});
+const bundle = await fetchText(bundleUrl, "NeetCode catalog bundle");
 const problems = canonicalize(parsePublicProblemObjects(bundle));
-const count150 = problems.filter((problem) => problem.catalogs.includes("neetcode150")).length;
-const count250 = problems.filter((problem) => problem.catalogs.includes("neetcode250")).length;
-if (count150 !== 150 || count250 !== 250) throw new Error(`Catalog validation failed (150=${count150}, 250=${count250}). NeetCode may have changed its bundle shape.`);
-
 const generatedAt = new Date().toISOString();
 const version = `neetcode-${generatedAt.slice(0, 10)}-${createHash("sha256").update(bundle).digest("hex").slice(0, 10)}`;
-const snapshot = { source: "neetcode-public-catalog", sourceUrl: pageUrl, bundleUrl, generatedAt, version, problems };
+const snapshot = validateCatalogSnapshot({ source: "neetcode-public-catalog", sourceUrl: pageUrl, bundleUrl, generatedAt, version, problems });
 const output = resolve("data/catalog.snapshot.json");
 await mkdir(resolve("data"), { recursive: true });
 await writeFile(output, `${JSON.stringify(snapshot, null, 2)}\n`);
+const count150 = problems.filter((problem) => problem.catalogs.includes("neetcode150")).length;
+const count250 = problems.filter((problem) => problem.catalogs.includes("neetcode250")).length;
 console.log(`Wrote ${problems.length} problems (${count150} in 150, ${count250} in 250) to ${output}`);
