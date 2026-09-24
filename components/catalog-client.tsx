@@ -1,69 +1,55 @@
 "use client";
 
+import * as Popover from "@radix-ui/react-popover";
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowUpRight, CheckCircle2, Filter, Search, Sparkles } from "lucide-react";
-import { CATALOGS } from "@/lib/constants";
+import { ChevronDown, Filter, Search } from "lucide-react";
 import { setActiveCatalog } from "@/lib/actions";
-import { ratingOptions } from "@/lib/scheduler";
-import { cn, formatRelativeDue } from "@/lib/utils";
-import { ReviewRatingForm } from "@/components/review-rating-form";
+import { CATALOGS } from "@/lib/constants";
 import type { CatalogId, CatalogProblem } from "@/lib/types";
+import { cn, formatRelativeDue } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
-type StatusFilter = "all" | "new" | "due" | "overdue" | "weak" | "strong";
+type StatusFilter = "all" | "due" | "new";
 
-export function CatalogClient({ initialCatalog, problems }: { initialCatalog: CatalogId; problems: CatalogProblem[] }) {
+function DifficultyBadge({ difficulty }: { difficulty: CatalogProblem["difficulty"] }) { return <Badge variant={difficulty.toLowerCase() as "easy" | "medium" | "hard"}>{difficulty}</Badge>; }
+
+export function CatalogClient({ initialCatalog, initialStatus = "all", initialTopic = "all", problems }: { initialCatalog: CatalogId; initialStatus?: StatusFilter; initialTopic?: string; problems: CatalogProblem[] }) {
   const router = useRouter();
   const [catalog, setCatalog] = useState<CatalogId>(initialCatalog);
-  const [catalogProblems, setCatalogProblems] = useState(problems);
   const [search, setSearch] = useState("");
   const [difficulty, setDifficulty] = useState("all");
-  const [topic, setTopic] = useState("all");
-  const [status, setStatus] = useState<StatusFilter>("all");
-  const [selected, setSelected] = useState<CatalogProblem | null>(null);
-  const [pending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
+  const [topic, setTopic] = useState(initialTopic);
+  const [status, setStatus] = useState<StatusFilter>(initialStatus);
+  const [visible, setVisible] = useState(60);
   const [now] = useState(() => Date.now());
-  const topics = useMemo(() => Array.from(new Set(catalogProblems.flatMap((problem) => problem.topics))).sort(), [catalogProblems]);
-  const filtered = useMemo(() => catalogProblems.filter((problem) => {
-    const dueAt = problem.card ? new Date(problem.card.due_at).getTime() : null;
-    const due = dueAt != null && dueAt <= now;
-    const overdue = dueAt != null && dueAt < now - 60 * 60 * 1000;
-    const weak = Boolean(problem.card && ((problem.card.retrievability ?? 1) < .75 || problem.card.latest_rating === "again" || problem.card.latest_rating === "hard"));
-    const strong = Boolean(problem.card && (problem.card.retrievability ?? 0) >= .9 && (problem.card.stability ?? 0) >= 30);
-    const matchesStatus = status === "all" || (status === "new" && !problem.card) || (status === "due" && due) || (status === "overdue" && overdue) || (status === "weak" && weak) || (status === "strong" && strong);
-    return matchesStatus && (difficulty === "all" || problem.difficulty === difficulty) && (topic === "all" || problem.topics.includes(topic)) && `${problem.title} ${problem.topics.join(" ")}`.toLowerCase().includes(search.toLowerCase());
-  }), [catalogProblems, difficulty, topic, status, search, now]);
-
-  function switchCatalog(value: CatalogId) {
+  const [pending, startTransition] = useTransition();
+  const topics = useMemo(() => Array.from(new Set(problems.flatMap((problem) => problem.topics))).sort(), [problems]);
+  const filtered = useMemo(() => problems.filter((problem) => {
+    const isDue = Boolean(problem.card && new Date(problem.card.due_at).getTime() <= now);
+    return (status === "all" || status === "due" && isDue || status === "new" && !problem.card)
+      && (difficulty === "all" || problem.difficulty === difficulty)
+      && (topic === "all" || problem.topics.includes(topic))
+      && `${problem.leetcodeNumber} ${problem.title} ${problem.topics.join(" ")}`.toLowerCase().includes(search.trim().toLowerCase());
+  }), [difficulty, now, problems, search, status, topic]);
+  const visibleProblems = filtered.slice(0, visible);
+  const switchCatalog = (value: CatalogId) => {
+    if (value === catalog) return;
     setCatalog(value);
-    setError(null);
     startTransition(async () => {
       const result = await setActiveCatalog(value);
-      if (!result.ok) return setError(result.error);
-      setSelected(null);
+      if (!result.ok) { setCatalog(initialCatalog); return; }
       window.dispatchEvent(new Event("recallcode:catalog-changed"));
       router.refresh();
     });
-  }
-
-  return <div className="problems-workspace">
-    <div className="catalog-header-row"><div className="segmented-control" aria-label="Study list">{(Object.keys(CATALOGS) as CatalogId[]).map((id) => <button type="button" onClick={() => switchCatalog(id)} className={cn(catalog === id && "selected")} disabled={pending} key={id}>{CATALOGS[id].name.replace("NeetCode ", "")}</button>)}</div><span className="muted-count">{catalogProblems.length} problems in this list</span></div>
-    <div className="filter-tabs" aria-label="Problem status filter">{(["all", "due", "overdue", "weak", "strong", "new"] as StatusFilter[]).map((value) => <button key={value} className={status === value ? "selected" : ""} onClick={() => setStatus(value)}>{value === "all" ? "All" : value === "new" ? "New" : value[0].toUpperCase() + value.slice(1)}</button>)}</div>
-    <div className="filters-panel light-panel"><label className="search-box"><Search size={18} /><input placeholder="Search problems or patterns" value={search} onChange={(event) => setSearch(event.target.value)} /></label><div className="filter-row"><Filter size={16} /><select aria-label="Difficulty" value={difficulty} onChange={(event) => setDifficulty(event.target.value)}><option value="all">All difficulties</option><option>Easy</option><option>Medium</option><option>Hard</option></select><select aria-label="Pattern" value={topic} onChange={(event) => setTopic(event.target.value)}><option value="all">All patterns</option>{topics.map((name) => <option key={name}>{name}</option>)}</select></div></div>
-    {error && <p className="form-error">{error}</p>}
-    {selected && <section className="first-solve-panel"><div className="inline-review-heading"><div><span>First solve</span><h2>{selected.title}</h2><p>Open the problem, solve it, then record how it went.</p></div><button onClick={() => setSelected(null)} aria-label="Close first solve">×</button></div><div className="external-links"><a className="primary-button" href={selected.neetcode_url ?? selected.leetcode_url ?? "#"} target="_blank" rel="noreferrer">Solve on NeetCode <ArrowUpRight size={16} /></a>{selected.leetcode_url && <a className="plain-link" href={selected.leetcode_url} target="_blank" rel="noreferrer">LeetCode <ArrowUpRight size={14} /></a>}</div><ReviewRatingForm problemId={selected.id} options={ratingOptions(null)} onComplete={(result) => { setCatalogProblems((items) => items.map((problem) => problem.id === selected.id ? { ...problem, card: { due_at: result.updatedCard.dueAt, reps: result.updatedCard.repetitions, last_review_at: new Date().toISOString(), stability: result.updatedCard.stability, lapses: result.updatedCard.lapses, scheduled_days: result.updatedCard.scheduledDays, first_solved_at: result.updatedCard.firstSolvedAt, retrievability: result.newRetrievability, latest_rating: null } } : problem)); setSelected(null); }} /></section>}
-    <section className="problems-table-card"><div className="problems-table-head"><span>Problem</span><span>Pattern</span><span>Difficulty</span><span>Memory</span><span>Last reviewed</span><span>Next review</span><span>Status</span><span>Reviews</span></div>{filtered.map((problem) => <article className="problems-table-row" key={problem.id}><div><Link href={`/problems/${problem.id}`} className="problem-link">{problem.title}</Link><small>{problem.topics.slice(1).join(" · ")}</small></div><div>{problem.topics[0] ?? "—"}</div><div><span className={`difficulty difficulty-${problem.difficulty.toLowerCase()}`}>{problem.difficulty}</span></div><div>{problem.card ? `${Math.round((problem.card.retrievability ?? 0) * 100)}%` : "—"}</div><div>{problem.card?.last_review_at ? formatRelativeDue(problem.card.last_review_at).replace("overdue", "ago") : "—"}</div><div>{problem.card ? formatRelativeDue(problem.card.due_at) : "—"}</div><div><Status card={problem.card} now={now} /></div><div>{problem.card?.reps ?? 0}</div><div className="problem-row-actions">{!problem.card ? <button className="start-button" onClick={() => setSelected(problem)}><Sparkles size={15} /> First solve</button> : new Date(problem.card.due_at).getTime() <= now ? <Link className="start-button" href="/review"><CheckCircle2 size={15} /> Review</Link> : <Link className="icon-link" href={`/problems/${problem.id}`} aria-label={`View ${problem.title}`}><ArrowUpRight size={18} /></Link>}</div></article>)}{filtered.length === 0 && <p className="empty-inline">No problems match those filters.</p>}</section>
-  </div>;
-}
-
-function Status({ card, now }: { card: CatalogProblem["card"]; now: number }) {
-  if (!card) return <span className="status-new">New</span>;
-  const dueAt = new Date(card.due_at).getTime();
-  if (dueAt <= now - 60 * 60 * 1000) return <span className="status-overdue">Overdue</span>;
-  if (dueAt <= now) return <span className="status-due">Due now</span>;
-  if ((card.retrievability ?? 0) < .75 || card.latest_rating === "again" || card.latest_rating === "hard") return <span className="status-weak">Weak</span>;
-  if ((card.retrievability ?? 0) >= .9 && (card.stability ?? 0) >= 30) return <span className="status-strong">Strong</span>;
-  return <span className="status-active">Learning</span>;
+  };
+  const changeFilter = (next: StatusFilter) => { setStatus(next); setVisible(60); };
+  return <section>
+    <header className="mb-6 flex flex-wrap items-end justify-between gap-4"><div><p className="mb-1 text-sm text-muted-foreground">Your shared library</p><h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Problems</h1><p className="mt-2 text-sm text-muted-foreground">Progress stays with a problem even when you switch catalogs.</p></div><span className="text-sm text-muted-foreground">{problems.length} problems</span></header>
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div className="flex rounded-md border border-border bg-card p-1" aria-label="Study list">{(Object.keys(CATALOGS) as CatalogId[]).map((id) => <button type="button" disabled={pending} onClick={() => switchCatalog(id)} className={cn("min-h-8 rounded px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-50", catalog === id && "bg-accent text-accent-foreground shadow-sm")} key={id}>{CATALOGS[id].name.replace("NeetCode ", "")}</button>)}</div><div className="flex rounded-md border border-border bg-card p-1">{(["all", "due", "new"] as StatusFilter[]).map((value) => <button type="button" onClick={() => changeFilter(value)} className={cn("min-h-8 rounded px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground", status === value && "bg-accent text-accent-foreground shadow-sm")} key={value}>{value === "all" ? "All" : value === "due" ? "Due" : "New"}</button>)}</div></div>
+    <div className="mb-4 flex flex-col gap-2 sm:flex-row"><label className="flex min-h-10 flex-1 items-center gap-2 rounded-md border border-input bg-card px-3"><Search size={16} className="text-muted-foreground" /><input value={search} onChange={(event) => { setSearch(event.target.value); setVisible(60); }} placeholder="Filter by number, title, or pattern" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground" /></label><Popover.Root><Popover.Trigger asChild><Button variant="outline" type="button"><Filter size={15} /> Filters <ChevronDown size={14} /></Button></Popover.Trigger><Popover.Portal><Popover.Content align="end" sideOffset={8} className="z-40 w-64 rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-xl"><p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Difficulty</p><div className="flex flex-wrap gap-1">{["all", "Easy", "Medium", "Hard"].map((value) => <button type="button" className={cn("min-h-8 rounded px-2 text-xs", difficulty === value ? "bg-accent text-accent-foreground" : "hover:bg-accent")} onClick={() => { setDifficulty(value); setVisible(60); }} key={value}>{value === "all" ? "All" : value}</button>)}</div><p className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pattern</p><select value={topic} onChange={(event) => { setTopic(event.target.value); setVisible(60); }} className="min-h-10 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus:ring-2 focus:ring-ring"><option value="all">All patterns</option>{topics.map((name) => <option key={name}>{name}</option>)}</select></Popover.Content></Popover.Portal></Popover.Root></div>
+    <div className="overflow-hidden rounded-lg border border-border bg-card"><div className="hidden grid-cols-[4.5rem_minmax(0,1fr)_8rem_8rem_8rem] gap-3 border-b border-border px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:grid"><span>Number</span><span>Problem</span><span>Pattern</span><span>Difficulty</span><span>Status</span></div><div className="divide-y divide-border">{visibleProblems.map((problem) => { const due = Boolean(problem.card && new Date(problem.card.due_at).getTime() <= now); return <article className="grid min-h-16 grid-cols-[3.25rem_minmax(0,1fr)_auto] items-center gap-2 px-4 py-3 transition-colors hover:bg-accent md:grid-cols-[4.5rem_minmax(0,1fr)_8rem_8rem_8rem] md:gap-3" key={problem.id}><span className="font-mono text-xs text-muted-foreground">#{problem.leetcodeNumber}</span><Link href={`/problems/${problem.id}`} scroll={false} className="min-w-0"><span className="block truncate text-sm font-medium">{problem.title}</span><span className="mt-0.5 block truncate text-xs text-muted-foreground md:hidden">{problem.topics[0] ?? "Problem"} · {problem.card ? formatRelativeDue(problem.card.due_at) : "New"}</span></Link><span className="hidden truncate text-xs text-muted-foreground md:block">{problem.topics[0] ?? "—"}</span><span className="hidden md:block"><DifficultyBadge difficulty={problem.difficulty} /></span><span>{!problem.card ? <Badge variant="muted">New</Badge> : due ? <Badge variant="due">Due</Badge> : <span className="text-xs text-muted-foreground">{formatRelativeDue(problem.card.due_at)}</span>}</span></article>; })}</div>{filtered.length === 0 && <p className="px-4 py-10 text-center text-sm text-muted-foreground">No problems match those filters.</p>}{visible < filtered.length && <div className="border-t border-border p-3 text-center"><Button variant="ghost" type="button" onClick={() => setVisible((value) => value + 60)}>Show 60 more</Button></div>}</div>
+  </section>;
 }

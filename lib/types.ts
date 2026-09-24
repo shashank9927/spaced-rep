@@ -37,6 +37,7 @@ export interface FsrsCardState {
 export interface ProblemSummary {
   id: string;
   source_id: string;
+  leetcodeNumber: number;
   title: string;
   slug: string;
   difficulty: ProblemDifficulty;
@@ -90,7 +91,7 @@ export interface ReviewLogSummary {
   previous_due_at: string | null;
   next_due_at: string;
   scheduled_days: number;
-  problems?: { title: string; difficulty: ProblemDifficulty } | null;
+  problems?: { title: string; difficulty: ProblemDifficulty; source_id?: string } | null;
 }
 
 export interface ScheduleItem {
@@ -110,8 +111,6 @@ export interface ScheduleDay {
 export interface SubmitReviewInput {
   problemId: string;
   rating: ReviewRating;
-  durationMinutes?: number;
-  patternRecall?: PatternRecall;
   note?: string;
   requestId: string;
 }

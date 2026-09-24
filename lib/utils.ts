@@ -1,5 +1,19 @@
-export function cn(...values: Array<string | false | null | undefined>): string {
-  return values.filter(Boolean).join(" ");
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
+
+export function cn(...values: ClassValue[]): string {
+  return twMerge(clsx(values));
+}
+
+export function leetcodeNumberFromSourceId(sourceId: string): number {
+  const match = /^(\d+)-/.exec(sourceId);
+  if (!match) throw new Error(`Invalid LeetCode source ID: ${sourceId}`);
+  const value = Number.parseInt(match[1], 10);
+  if (!Number.isSafeInteger(value) || value < 1) throw new Error(`Invalid LeetCode number: ${sourceId}`);
+  // The public catalog snapshot keeps NeetCode's stable source IDs. One
+  // historical source ID carries LeetCode 2633 while its linked problem is
+  // actually LeetCode 2683; preserve the stable ID while displaying truth.
+  return sourceId === "2633-neighboring-bitwise-xor" ? 2683 : value;
 }
 
 export function localDateKey(date: Date, timeZone: string): string {

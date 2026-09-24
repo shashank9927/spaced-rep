@@ -21,6 +21,12 @@ async function assert(step, request) {
 
 const sourceIds = snapshot.problems.map((problem) => problem.sourceId);
 if (new Set(sourceIds).size !== sourceIds.length) throw new Error("Catalog snapshot contains duplicate source IDs.");
+const leetcodeNumbers = sourceIds.map((sourceId) => {
+  const match = /^(\d+)-/.exec(sourceId);
+  if (!match || Number.parseInt(match[1], 10) < 1) throw new Error(`Catalog snapshot has an invalid LeetCode source ID: ${sourceId}`);
+  return sourceId === "2633-neighboring-bitwise-xor" ? 2683 : Number.parseInt(match[1], 10);
+});
+if (new Set(leetcodeNumbers).size !== leetcodeNumbers.length) throw new Error("Catalog snapshot contains duplicate LeetCode problem numbers.");
 const memberships = (slug) => snapshot.problems.filter((problem) => problem.catalogs.includes(slug));
 if (memberships("neetcode150").length !== 150) throw new Error("Catalog snapshot must contain exactly 150 NeetCode 150 memberships.");
 if (memberships("neetcode250").length !== 250) throw new Error("Catalog snapshot must contain exactly 250 NeetCode 250 memberships.");

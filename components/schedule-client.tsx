@@ -1,58 +1,40 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CalendarDays, ChevronLeft, ChevronRight, CircleCheck, Clock3, ListChecks } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, CircleCheck, Clock3 } from "lucide-react";
 import type { ScheduleDay, ScheduleItem } from "@/lib/types";
-import { cn, formatRelativeDue } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 type SchedulePayload = { month: string; todayKey: string; days: ScheduleDay[] };
-
-function shiftMonth(month: string, amount: number) {
-  const [year, value] = month.split("-").map(Number);
-  const date = new Date(Date.UTC(year, value - 1 + amount, 1));
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-
-function monthLabel(month: string) {
-  return new Intl.DateTimeFormat("en", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${month}-01T12:00:00.000Z`));
-}
-
-function compactTitle(item: ScheduleItem) {
-  return item.kind === "new" ? `New · ${item.problem.title}` : item.kind.startsWith("completed") ? `Done · ${item.problem.title}` : item.problem.title;
-}
+function shiftMonth(month: string, amount: number) { const [year, value] = month.split("-").map(Number); const date = new Date(Date.UTC(year, value - 1 + amount, 1)); return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`; }
+function label(dateKey: string) { return new Intl.DateTimeFormat("en", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${dateKey}T12:00:00.000Z`)); }
+function itemLabel(item: ScheduleItem) { return item.kind === "new" ? "New problem" : item.kind === "completed-new" ? "First solve" : item.kind === "completed-review" ? "Review complete" : item.status === "overdue" ? "Overdue review" : "Review"; }
 
 export function ScheduleClient({ data }: { data: SchedulePayload }) {
   const router = useRouter();
-  const [selectedDate, setSelectedDate] = useState(data.days.some((day) => day.dateKey === data.todayKey) ? data.todayKey : data.days[0]?.dateKey ?? "");
+  const [monthOpen, setMonthOpen] = useState(false);
+  const [selectedKey, setSelectedKey] = useState(data.todayKey);
   const [pending, startTransition] = useTransition();
-  const selected = data.days.find((day) => day.dateKey === selectedDate) ?? data.days[0];
   const currentMonth = data.todayKey.slice(0, 7);
-  const latestMonth = shiftMonth(currentMonth, 12);
-  const earliestMonth = shiftMonth(currentMonth, -12);
-  const canMoveBack = data.month > earliestMonth;
-  const canMoveForward = data.month < latestMonth;
+  const start = Math.max(0, data.days.findIndex((day) => day.dateKey === data.todayKey));
+  const agenda = data.days.slice(start, start + 14);
   const weeks = useMemo(() => Array.from({ length: Math.ceil(data.days.length / 7) }, (_, index) => data.days.slice(index * 7, index * 7 + 7)), [data.days]);
-
-  function navigate(month: string) {
-    startTransition(() => router.push(`/schedule?month=${month}`));
-  }
-
-  return <section className="schedule-page">
-    <div className="page-heading compact-heading schedule-heading"><div><span className="eyebrow">Forecast, not a fixed promise</span><h1>Schedule</h1><p>Reviews move when you review. New-problem suggestions shift when you solve ahead.</p></div><div className="schedule-controls"><button type="button" onClick={() => navigate(shiftMonth(data.month, -1))} disabled={!canMoveBack || pending} aria-label="Previous month"><ChevronLeft size={18} /></button><button type="button" onClick={() => navigate(currentMonth)} disabled={data.month === currentMonth || pending}>Today</button><button type="button" onClick={() => navigate(shiftMonth(data.month, 1))} disabled={!canMoveForward || pending} aria-label="Next month"><ChevronRight size={18} /></button></div></div>
-    <div className="schedule-layout">
-      <section className={cn("schedule-calendar", pending && "is-pending")} aria-label={`${monthLabel(data.month)} schedule`}>
-        <div className="schedule-month-title"><CalendarDays size={21} /><h2>{monthLabel(data.month)}</h2></div>
-        <div className="weekday-row">{["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => <span key={day}>{day}</span>)}</div>
-        <div className="month-grid">{weeks.flatMap((week) => week.map((day) => {
-          const inMonth = day.dateKey.startsWith(data.month);
-          const counts = day.items.reduce((acc, item) => ({ ...acc, [item.status]: (acc[item.status] ?? 0) + 1 }), {} as Record<string, number>);
-          return <button type="button" className={cn("schedule-day", !inMonth && "is-outside", day.dateKey === data.todayKey && "is-today", selectedDate === day.dateKey && "is-selected")} onClick={() => setSelectedDate(day.dateKey)} key={day.dateKey} aria-pressed={selectedDate === day.dateKey}><span className="schedule-day-number">{Number(day.dateKey.slice(-2))}</span><div className="schedule-day-counts">{counts.overdue ? <i className="count-overdue">{counts.overdue} overdue</i> : null}{counts.due ? <i className="count-due">{counts.due} due</i> : null}{counts.upcoming ? <i className="count-upcoming">{counts.upcoming} planned</i> : null}{counts.completed ? <i className="count-completed">{counts.completed} done</i> : null}</div><div className="schedule-titles">{day.items.slice(0, 2).map((item, index) => <small key={`${item.kind}-${item.problem.id}-${index}`} className={`item-${item.status}`}>{compactTitle(item)}</small>)}{day.items.length > 2 && <small>+{day.items.length - 2} more</small>}</div></button>;
-        }))}</div>
-      </section>
-      {selected && <aside className="schedule-detail"><div className="section-title"><span><ListChecks size={20} /> {new Intl.DateTimeFormat("en", { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${selected.dateKey}T12:00:00.000Z`))}</span>{selected.isStudyDay ? <span className="queue-count">Study day</span> : <span className="queue-count">Rest day</span>}</div><p className="subtle-copy">{selected.dateKey > data.todayKey ? "Future entries are forecasts and update as you study." : selected.dateKey === data.todayKey ? "Reviews are always actionable; new problems follow your target." : "Completed work is recorded here privately."}</p><div className="schedule-item-list">{selected.items.length ? selected.items.map((item, index) => <article className={`schedule-item item-${item.status}`} key={`${item.kind}-${item.problem.id}-${index}`}><span>{item.status === "completed" ? <CircleCheck size={17} /> : <Clock3 size={17} />}</span><div><strong>{item.problem.title}</strong><small>{item.kind === "new" ? `New ${item.problem.difficulty} problem` : item.status === "overdue" ? "Overdue review" : item.status === "completed" ? item.kind === "completed-new" ? "First solve completed" : "Review completed" : item.dueAt ? formatRelativeDue(item.dueAt) : "Scheduled review"}</small></div>{item.status !== "completed" && <Link href={item.kind === "new" ? `/problems/${item.problem.id}` : "/review"} aria-label={`Open ${item.problem.title}`}><ChevronRight size={17} /></Link>}</article>) : <p className="empty-copy">{selected.isStudyDay ? "No work forecast yet. Set targets in Settings to add new problems." : "No new problems on this rest day. Due reviews still appear here."}</p>}</div></aside>}
-    </div>
-    <section className="schedule-agenda" aria-label="Schedule agenda">{data.days.filter((day) => day.dateKey.startsWith(data.month)).map((day) => <button type="button" className={cn(day.dateKey === selectedDate && "selected")} onClick={() => setSelectedDate(day.dateKey)} key={day.dateKey}><strong>{new Intl.DateTimeFormat("en", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${day.dateKey}T12:00:00.000Z`))}</strong><span>{day.items.length ? day.items.map((item) => compactTitle(item)).join(" · ") : day.isStudyDay ? "No work forecast" : "Rest day"}</span></button>)}</section>
+  const navigate = (month: string) => startTransition(() => { router.push(`/schedule?month=${month}`); });
+  const selected = data.days.find((day) => day.dateKey === selectedKey) ?? agenda[0];
+  return <section className="mx-auto max-w-5xl"><header className="mb-7 flex flex-wrap items-end justify-between gap-4"><div><p className="mb-1 text-sm text-muted-foreground">Forecast, not a fixed promise</p><h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Schedule</h1><p className="mt-2 text-sm text-muted-foreground">Reviews move when you study. New-problem suggestions shift with them.</p></div><Button variant="outline" type="button" onClick={() => setMonthOpen((value) => !value)}><CalendarDays size={16} /> {monthOpen ? "Hide month" : "Month overview"}</Button></header>
+    <section className="overflow-hidden rounded-lg border border-border bg-card"><div className="border-b border-border px-4 py-3"><h2 className="text-sm font-semibold">Next 14 days</h2><p className="mt-1 text-xs text-muted-foreground">Future new problems are suggestions. Due reviews stay uncapped.</p></div><div className="divide-y divide-border">{agenda.map((day) => <AgendaDay day={day} todayKey={data.todayKey} selected={selectedKey === day.dateKey} onSelect={() => setSelectedKey(day.dateKey)} key={day.dateKey} />)}</div></section>
+    {selected && <section className="mt-5 rounded-lg border border-border bg-card"><div className="flex items-center justify-between border-b border-border px-4 py-3"><div><h2 className="text-sm font-semibold">{label(selected.dateKey)}</h2><p className="mt-0.5 text-xs text-muted-foreground">{selected.dateKey > data.todayKey ? "Forecasted work updates as you study." : selected.dateKey === data.todayKey ? "Your current study day." : "Completed work is private."}</p></div><Badge variant="muted">{selected.isStudyDay ? "Study day" : "Rest day"}</Badge></div><div className="divide-y divide-border">{selected.items.length ? selected.items.map((item, index) => <div className="flex min-h-14 items-center gap-3 px-4 py-2.5" key={`${item.kind}-${item.problem.id}-${index}`}><span className="text-muted-foreground">{item.status === "completed" ? <CircleCheck size={16} className="text-emerald-500" /> : <Clock3 size={16} />}</span><span className="font-mono text-xs text-muted-foreground">#{item.problem.leetcodeNumber}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{item.problem.title}</span><span className="text-xs text-muted-foreground">{itemLabel(item)}{item.kind === "new" ? ` · ${item.problem.difficulty}` : ""}</span></span>{item.status !== "completed" && <Link href={item.kind === "new" ? `/problems/${item.problem.id}` : "/review"} className="text-xs font-medium text-primary hover:underline">Open</Link>}</div>) : <p className="px-4 py-7 text-sm text-muted-foreground">{selected.isStudyDay ? "No work forecast on this day." : "No new problems on this rest day. Due reviews still appear here."}</p>}</div></section>}
+    {monthOpen && <section className="mt-5 overflow-hidden rounded-lg border border-border bg-card"><div className="flex items-center justify-between border-b border-border px-4 py-3"><Button variant="ghost" size="icon-sm" aria-label="Previous month" disabled={pending} onClick={() => navigate(shiftMonth(data.month, -1))}><ChevronLeft size={17} /></Button><strong className="text-sm">{new Intl.DateTimeFormat("en", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${data.month}-01T12:00:00.000Z`))}</strong><div className="flex gap-1"><Button variant="ghost" size="sm" disabled={pending || data.month === currentMonth} onClick={() => navigate(currentMonth)}>Today</Button><Button variant="ghost" size="icon-sm" aria-label="Next month" disabled={pending} onClick={() => navigate(shiftMonth(data.month, 1))}><ChevronRight size={17} /></Button></div></div><div className="grid grid-cols-7 border-b border-border text-center text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => <span className="py-2" key={day}>{day}</span>)}</div><div className="grid grid-cols-7">{weeks.flatMap((week) => week.map((day) => { const count = day.items.length; const inMonth = day.dateKey.startsWith(data.month); return <button type="button" className={cn("min-h-18 border-b border-r border-border p-2 text-left hover:bg-accent", !inMonth && "text-muted-foreground/50", day.dateKey === selectedKey && "bg-accent")} onClick={() => { setSelectedKey(day.dateKey); setMonthOpen(false); }} key={day.dateKey}><span className="text-xs font-medium">{Number(day.dateKey.slice(-2))}</span>{count > 0 && <span className="mt-2 block text-[10px] text-muted-foreground">{count} item{count === 1 ? "" : "s"}</span>}<span className="mt-1 flex gap-1">{day.items.slice(0, 3).map((item, index) => <i className={cn("size-1.5 rounded-full", item.status === "overdue" ? "bg-rose-500" : item.status === "completed" ? "bg-emerald-500" : item.kind === "new" ? "bg-blue-500" : "bg-amber-500")} key={`${item.problem.id}-${index}`} />)}</span></button>; }))}</div></section>}
   </section>;
+}
+
+function AgendaDay({ day, todayKey, selected, onSelect }: { day: ScheduleDay; todayKey: string; selected: boolean; onSelect: () => void }) {
+  const reviewCount = day.items.filter((item) => item.kind === "review" && item.status !== "completed").length;
+  const newCount = day.items.filter((item) => item.kind === "new").length;
+  const completed = day.items.filter((item) => item.status === "completed").length;
+  return <button type="button" onClick={onSelect} className={cn("grid w-full min-h-16 grid-cols-[5.5rem_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 text-left hover:bg-accent", selected && "bg-accent")}><span><strong className="block text-sm font-medium">{label(day.dateKey)}</strong><span className="text-xs text-muted-foreground">{day.dateKey === todayKey ? "Today" : day.isStudyDay ? "Study day" : "Rest day"}</span></span><span className="min-w-0 truncate text-sm text-muted-foreground">{reviewCount ? `${reviewCount} review${reviewCount === 1 ? "" : "s"}` : ""}{reviewCount && newCount ? " · " : ""}{newCount ? `${newCount} new` : ""}{!reviewCount && !newCount && (completed ? `${completed} complete` : "No planned work")}</span><ChevronRight size={16} className="text-muted-foreground" /></button>;
 }

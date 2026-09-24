@@ -5,10 +5,11 @@ import type { ReviewLogSummary } from "@/lib/types";
 
 function card(overrides: Partial<StudyCard> = {}): StudyCard {
   return {
-    id: "00000000-0000-4000-8000-000000000001", source_id: "1", slug: "one", title: "One", difficulty: "Easy", leetcode_url: null, neetcode_url: null, topics: ["Arrays"],
+    id: "00000000-0000-4000-8000-000000000001", source_id: "0001-one", slug: "one", title: "One", difficulty: "Easy", leetcode_url: null, neetcode_url: null, topics: ["Arrays"],
     retrievability: .8, latest_rating: "good", latest_note: null, latest_reviewed_at: null,
     card: { due: "2026-09-23T10:00:00.000Z", due_at: "2026-09-23T10:00:00.000Z", stability: 10, difficulty: 5, elapsed_days: 2, scheduled_days: 3, learning_steps: 0, reps: 2, lapses: 0, state: 2, last_review: "2026-09-21T10:00:00.000Z", version: 1, first_solved_at: "2026-09-01T10:00:00.000Z" },
     ...overrides,
+    leetcodeNumber: overrides.leetcodeNumber ?? 1,
   };
 }
 

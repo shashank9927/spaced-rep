@@ -6,6 +6,7 @@ import { SCHEDULER_VERSION } from "@/lib/constants";
 import { getProfile, type Profile } from "@/lib/auth";
 import { cardStateForDatabase, retrievability, scheduleCard } from "@/lib/scheduler";
 import { createClient } from "@/lib/supabase/server";
+import { leetcodeNumberFromSourceId } from "@/lib/utils";
 import { CATALOG_IDS, PATTERN_RECALLS, REVIEW_RATINGS, STUDY_WEEKDAYS, type FsrsCardState, type ReviewRating, type StudyPlanPreferences, type SubmitReviewInput } from "@/lib/types";
 
 export type ActionResult = { ok: true; message?: string; nextDue?: string } | { ok: false; error: string };
@@ -30,6 +31,12 @@ const studyPlanSchema = z.object({
   }
 });
 
+const onboardingStudyPlanSchema = studyPlanSchema.superRefine((value, context) => {
+  if (value.easyPerDay + value.mediumPerDay + value.hardPerDay < 1) {
+    context.addIssue({ code: "custom", message: "Choose at least one new problem for each active study day." });
+  }
+});
+
 async function activeProfile(): Promise<Profile> {
   const profile = await getProfile();
   if (!profile) throw new Error("You need to sign in again.");
@@ -41,7 +48,7 @@ export async function saveOnboarding(input: { displayName: string; timezone: str
     displayName: z.string().trim().min(2).max(60),
     timezone: z.string().trim().min(1).max(80),
     selectedCatalog: z.enum(CATALOG_IDS),
-    studyPlan: studyPlanSchema,
+    studyPlan: onboardingStudyPlanSchema,
   }).safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Please enter a name and select a valid study list." };
 
@@ -162,7 +169,7 @@ export async function submitReview(input: SubmitReviewInput): Promise<ReviewActi
   revalidatePath("/problems");
   revalidatePath(`/problems/${parsed.data.problemId}`);
   revalidatePath("/schedule");
-  revalidatePath("/progress");
+  revalidatePath("/insights");
   return {
     ok: true,
     nextDue: next.due_at,
@@ -226,7 +233,7 @@ export async function getSearchIndex(): Promise<Array<{ type: "problem" | "patte
   const profile = await activeProfile();
   const supabase = await createClient();
   const { data, error } = await supabase.from("catalog_problems")
-    .select("problems(id,title,difficulty,problem_topics(topics(name)))")
+    .select("problems(id,source_id,title,difficulty,problem_topics(topics(name)))")
     .eq("catalog_slug", profile.selected_catalog)
     .order("sort_order");
   if (error) return [];
@@ -234,10 +241,10 @@ export async function getSearchIndex(): Promise<Array<{ type: "problem" | "patte
   for (const row of data ?? []) {
     const problem = Array.isArray((row as any).problems) ? (row as any).problems[0] : (row as any).problems;
     if (!problem?.id) continue;
-    items.set(`problem:${problem.id}`, { type: "problem", title: problem.title, subtitle: problem.difficulty, href: `/problems/${problem.id}` });
+    items.set(`problem:${problem.id}`, { type: "problem", title: `#${leetcodeNumberFromSourceId(problem.source_id)} ${problem.title}`, subtitle: problem.difficulty, href: `/problems/${problem.id}` });
     for (const relation of problem.problem_topics ?? []) {
       const topic = Array.isArray(relation.topics) ? relation.topics[0] : relation.topics;
-      if (topic?.name) items.set(`pattern:${topic.name}`, { type: "pattern", title: topic.name, subtitle: "Pattern", href: `/progress?view=patterns&topic=${encodeURIComponent(topic.name)}` });
+      if (topic?.name) items.set(`pattern:${topic.name}`, { type: "pattern", title: topic.name, subtitle: "Pattern insight", href: "/insights" });
     }
   }
   return [...items.values()];

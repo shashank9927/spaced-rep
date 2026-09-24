@@ -4,10 +4,11 @@ import { getProfile, type Profile } from "@/lib/auth";
 import { buildScheduleData, getTodayPlan } from "@/lib/study-plan";
 import { retrievability } from "@/lib/scheduler";
 import { createClient } from "@/lib/supabase/server";
+import { leetcodeNumberFromSourceId } from "@/lib/utils";
 import type { CatalogProblem, DueProblem, FsrsCardState, ProblemSummary, ReviewLogSummary, ReviewRating, StudyPlanPreferences } from "@/lib/types";
 
 const CARD_SELECT = "due_at,stability,difficulty,elapsed_days,scheduled_days,learning_steps,reps,lapses,state,last_review_at,version,first_solved_at,problems(id,source_id,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(topics(name)))";
-const LOG_SELECT = "id,problem_id,rating,reviewed_at,note,duration_minutes,pattern_recall,previous_due_at,next_due_at,scheduled_days,problems(title,difficulty)";
+const LOG_SELECT = "id,problem_id,rating,reviewed_at,note,duration_minutes,pattern_recall,previous_due_at,next_due_at,scheduled_days,problems(title,difficulty,source_id)";
 
 function topicsFrom(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -21,6 +22,7 @@ function toProblem(value: any): ProblemSummary {
   return {
     id: value.id,
     source_id: value.source_id,
+    leetcodeNumber: leetcodeNumberFromSourceId(value.source_id),
     slug: value.slug,
     title: value.title,
     difficulty: value.difficulty,
@@ -221,13 +223,11 @@ export async function getProblemDetail(problemId: string) {
   if (problemResult.error) throw problemResult.error;
   if (!problemResult.data || !snapshot) return null;
   const card = enrichCards(snapshot.rows, logs, snapshot.now).find((item) => item.id === problemId) ?? null;
-  const timed = logs.filter((log) => log.duration_minutes != null);
   return {
     profile: snapshot.profile,
     problem: toProblem(problemResult.data),
     card,
     logs,
-    averageDuration: timed.length ? Math.round(timed.reduce((sum, log) => sum + (log.duration_minutes ?? 0), 0) / timed.length) : null,
   };
 }
 
@@ -254,10 +254,9 @@ export async function getReviewHistory() {
 
 export async function getAdminData() {
   const supabase = await createClient();
-  const [invites, profiles, snapshots] = await Promise.all([
+  const [invites, snapshots] = await Promise.all([
     supabase.from("allowed_emails").select("email,invited_at,claimed_at,is_active").order("invited_at", { ascending: false }),
-    supabase.from("profiles").select("id,email,display_name,role,selected_catalog,created_at"),
     supabase.from("catalog_snapshots").select("version,imported_at,problem_count,source_url").order("imported_at", { ascending: false }).limit(6),
   ]);
-  return { invites: invites.data ?? [], profiles: profiles.data ?? [], snapshots: snapshots.data ?? [] };
+  return { invites: invites.data ?? [], snapshots: snapshots.data ?? [] };
 }
