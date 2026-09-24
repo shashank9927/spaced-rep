@@ -6,10 +6,29 @@ import { SCHEDULER_VERSION } from "@/lib/constants";
 import { getProfile, type Profile } from "@/lib/auth";
 import { cardStateForDatabase, retrievability, scheduleCard } from "@/lib/scheduler";
 import { createClient } from "@/lib/supabase/server";
-import { CATALOG_IDS, PATTERN_RECALLS, REVIEW_RATINGS, type FsrsCardState, type ReviewRating, type SubmitReviewInput } from "@/lib/types";
+import { CATALOG_IDS, PATTERN_RECALLS, REVIEW_RATINGS, STUDY_WEEKDAYS, type FsrsCardState, type ReviewRating, type StudyPlanPreferences, type SubmitReviewInput } from "@/lib/types";
 
 export type ActionResult = { ok: true; message?: string; nextDue?: string } | { ok: false; error: string };
-export type ReviewActionResult = { ok: true; nextDue: string; previousIntervalDays: number; newIntervalDays: number; previousRetrievability: number | null; newRetrievability: number } | { ok: false; error: string };
+export type ReviewActionResult = {
+  ok: true;
+  nextDue: string;
+  previousIntervalDays: number;
+  newIntervalDays: number;
+  previousRetrievability: number | null;
+  newRetrievability: number;
+  updatedCard: { problemId: string; dueAt: string; stability: number; lapses: number; repetitions: number; scheduledDays: number; firstSolvedAt: string };
+} | { ok: false; error: string };
+
+const studyPlanSchema = z.object({
+  easyPerDay: z.number().int().min(0).max(10),
+  mediumPerDay: z.number().int().min(0).max(10),
+  hardPerDay: z.number().int().min(0).max(10),
+  studyDays: z.array(z.enum(STUDY_WEEKDAYS)).min(1).max(7),
+}).superRefine((value, context) => {
+  if (value.easyPerDay + value.mediumPerDay + value.hardPerDay > 10) {
+    context.addIssue({ code: "custom", message: "Keep the combined daily target at 10 problems or fewer." });
+  }
+});
 
 async function activeProfile(): Promise<Profile> {
   const profile = await getProfile();
@@ -17,13 +36,14 @@ async function activeProfile(): Promise<Profile> {
   return profile;
 }
 
-export async function saveOnboarding(input: { displayName: string; timezone: string; selectedCatalog: string }): Promise<ActionResult> {
+export async function saveOnboarding(input: { displayName: string; timezone: string; selectedCatalog: string; studyPlan: Omit<StudyPlanPreferences, "configured"> }): Promise<ActionResult> {
   const parsed = z.object({
     displayName: z.string().trim().min(2).max(60),
     timezone: z.string().trim().min(1).max(80),
     selectedCatalog: z.enum(CATALOG_IDS),
+    studyPlan: studyPlanSchema,
   }).safeParse(input);
-  if (!parsed.success) return { ok: false, error: "Please enter a name and select a valid study list." };
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Please enter a name and select a valid study list." };
 
   const profile = await activeProfile();
   const supabase = await createClient();
@@ -31,6 +51,11 @@ export async function saveOnboarding(input: { displayName: string; timezone: str
     display_name: parsed.data.displayName,
     timezone: parsed.data.timezone,
     selected_catalog: parsed.data.selectedCatalog,
+    new_easy_per_day: parsed.data.studyPlan.easyPerDay,
+    new_medium_per_day: parsed.data.studyPlan.mediumPerDay,
+    new_hard_per_day: parsed.data.studyPlan.hardPerDay,
+    study_days: parsed.data.studyPlan.studyDays,
+    study_plan_configured_at: new Date().toISOString(),
   }).eq("id", profile.id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/dashboard");
@@ -45,7 +70,9 @@ export async function setActiveCatalog(selectedCatalog: string): Promise<ActionR
   const { error } = await supabase.from("profiles").update({ selected_catalog: catalog.data }).eq("id", profile.id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/catalog");
+  revalidatePath("/problems");
   revalidatePath("/dashboard");
+  revalidatePath("/schedule");
   return { ok: true };
 }
 
@@ -132,12 +159,9 @@ export async function submitReview(input: SubmitReviewInput): Promise<ReviewActi
   }
 
   revalidatePath("/dashboard");
-  revalidatePath("/catalog");
   revalidatePath("/problems");
   revalidatePath(`/problems/${parsed.data.problemId}`);
-  revalidatePath("/review");
-  revalidatePath("/history");
-  revalidatePath("/patterns");
+  revalidatePath("/schedule");
   revalidatePath("/progress");
   return {
     ok: true,
@@ -146,7 +170,35 @@ export async function submitReview(input: SubmitReviewInput): Promise<ReviewActi
     newIntervalDays: next.scheduled_days,
     previousRetrievability,
     newRetrievability,
+    updatedCard: {
+      problemId: parsed.data.problemId,
+      dueAt: next.due_at,
+      stability: next.stability,
+      lapses: next.lapses,
+      repetitions: next.reps,
+      scheduledDays: next.scheduled_days,
+      firstSolvedAt: row?.first_solved_at ?? now.toISOString(),
+    },
   };
+}
+
+export async function saveStudyPlanPreferences(input: Omit<StudyPlanPreferences, "configured">): Promise<ActionResult> {
+  const parsed = studyPlanSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Check your study plan." };
+  const profile = await activeProfile();
+  const supabase = await createClient();
+  const { error } = await supabase.from("profiles").update({
+    new_easy_per_day: parsed.data.easyPerDay,
+    new_medium_per_day: parsed.data.mediumPerDay,
+    new_hard_per_day: parsed.data.hardPerDay,
+    study_days: parsed.data.studyDays,
+    study_plan_configured_at: new Date().toISOString(),
+  }).eq("id", profile.id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/dashboard");
+  revalidatePath("/schedule");
+  revalidatePath("/settings");
+  return { ok: true, message: "Study plan saved." };
 }
 
 export async function saveSettings(input: { displayName: string; timezone: string; selectedCatalog: string }): Promise<ActionResult> {
@@ -170,28 +222,25 @@ export async function saveSettings(input: { displayName: string; timezone: strin
   return { ok: true, message: "Settings saved." };
 }
 
-export async function searchCatalog(query: string): Promise<Array<{ type: "problem" | "pattern"; title: string; subtitle: string; href: string }>> {
-  const parsed = z.string().trim().min(1).max(80).safeParse(query);
-  if (!parsed.success) return [];
+export async function getSearchIndex(): Promise<Array<{ type: "problem" | "pattern"; title: string; subtitle: string; href: string }>> {
   const profile = await activeProfile();
   const supabase = await createClient();
-  const text = parsed.data.replace(/[%_]/g, "");
-  const [problems, topics] = await Promise.all([
-    supabase.from("problems")
-      .select("id,title,difficulty,catalog_problems!inner(catalog_slug)")
-      .eq("catalog_problems.catalog_slug", profile.selected_catalog)
-      .ilike("title", `%${text}%`)
-      .limit(8),
-    supabase.from("topics").select("name").ilike("name", `%${text}%`).limit(4),
-  ]);
-  const matches: Array<{ type: "problem" | "pattern"; title: string; subtitle: string; href: string }> = [];
-  for (const problem of problems.data ?? []) {
-    if (problem?.id) matches.push({ type: "problem", title: problem.title, subtitle: problem.difficulty, href: `/problems/${problem.id}` });
+  const { data, error } = await supabase.from("catalog_problems")
+    .select("problems(id,title,difficulty,problem_topics(topics(name)))")
+    .eq("catalog_slug", profile.selected_catalog)
+    .order("sort_order");
+  if (error) return [];
+  const items = new Map<string, { type: "problem" | "pattern"; title: string; subtitle: string; href: string }>();
+  for (const row of data ?? []) {
+    const problem = Array.isArray((row as any).problems) ? (row as any).problems[0] : (row as any).problems;
+    if (!problem?.id) continue;
+    items.set(`problem:${problem.id}`, { type: "problem", title: problem.title, subtitle: problem.difficulty, href: `/problems/${problem.id}` });
+    for (const relation of problem.problem_topics ?? []) {
+      const topic = Array.isArray(relation.topics) ? relation.topics[0] : relation.topics;
+      if (topic?.name) items.set(`pattern:${topic.name}`, { type: "pattern", title: topic.name, subtitle: "Pattern", href: `/progress?view=patterns&topic=${encodeURIComponent(topic.name)}` });
+    }
   }
-  for (const topic of topics.data ?? []) {
-    if (topic?.name) matches.push({ type: "pattern", title: topic.name, subtitle: "Pattern", href: `/patterns?topic=${encodeURIComponent(topic.name)}` });
-  }
-  return matches;
+  return [...items.values()];
 }
 
 export async function inviteUser(email: string): Promise<ActionResult> {

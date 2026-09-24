@@ -5,8 +5,6 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { requireProfile } from "@/lib/auth";
 import { displayNameFromEmail } from "@/lib/utils";
 
-export const dynamic = "force-dynamic";
-
 export default async function OnboardingPage() {
   const profile = await requireProfile({ onboarding: true });
   if (profile.display_name) redirect("/dashboard");

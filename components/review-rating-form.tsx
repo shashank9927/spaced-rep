@@ -20,11 +20,14 @@ export function ReviewRatingForm({ problemId, options, onComplete }: { problemId
     startTransition(async () => {
       const result = await submitReview({ problemId, rating, note, durationMinutes, patternRecall, requestId: crypto.randomUUID() });
       if (!result.ok) return setMessage(result.error);
-      setCompletion(result);
       setNote("");
       setMinutes("");
       setPatternRecall(undefined);
-      window.setTimeout(() => onComplete?.(result), 1500);
+      if (onComplete) {
+        onComplete(result);
+        return;
+      }
+      setCompletion(result);
     });
   }, [minutes, note, onComplete, patternRecall, problemId]);
 
