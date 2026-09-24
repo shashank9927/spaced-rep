@@ -63,5 +63,5 @@ $$;
 
 revoke all on function public.save_profile_settings_service(uuid, text, text, text, boolean) from public, anon, authenticated;
 grant execute on function public.save_profile_settings_service(uuid, text, text, text, boolean) to service_role;
-revoke all on function public.submit_review_service(uuid, uuid, uuid, public.review_rating, timestamptz, text, text, timestamptz, timestamptz, double precision, double precision, integer, integer, integer, integer, integer, timestamptz, timestamptz, integer) from public, anon, authenticated;
+revoke all on function public.submit_review_service(uuid, uuid, uuid, public.review_rating, timestamptz, text, text, timestamptz, timestamptz, double precision, double precision, integer, integer, integer, integer, integer, integer, timestamptz, timestamptz, integer) from public, anon, authenticated;
 grant execute on function public.submit_review_service(uuid, uuid, uuid, public.review_rating, timestamptz, text, text, timestamptz, timestamptz, double precision, double precision, integer, integer, integer, integer, integer, integer, timestamptz, timestamptz, integer) to service_role;
