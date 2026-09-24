@@ -3,6 +3,7 @@ export type CatalogId = (typeof CATALOG_IDS)[number];
 
 export const REVIEW_RATINGS = ["again", "hard", "good", "easy"] as const;
 export type ReviewRating = (typeof REVIEW_RATINGS)[number];
+export type ReviewEventKind = "first_attempt" | "scheduled_review" | "early_review";
 
 export type ProblemDifficulty = "Easy" | "Medium" | "Hard";
 export type ProblemStatus = "new" | "active" | "due";
@@ -30,6 +31,7 @@ export interface ProblemSummary {
   leetcode_url: string | null;
   neetcode_url: string | null;
   topics: string[];
+  primaryTopic?: string | null;
 }
 
 export interface CatalogProblem extends ProblemSummary {
@@ -75,10 +77,13 @@ export interface ReviewLogSummary {
   previous_due_at: string | null;
   next_due_at: string;
   scheduled_days: number;
+  event_kind?: ReviewEventKind;
+  result_version?: number | null;
+  reversed_at?: string | null;
   problems?: { title: string; difficulty: ProblemDifficulty; source_id?: string; leetcode_number?: number } | null;
 }
 
-export type ScheduleItemKind = "review" | "completed-review" | "completed-attempt";
+export type ScheduleItemKind = "review" | "completed-review" | "completed-attempt" | "completed-early-review";
 
 export interface ScheduleItem {
   dateKey: string;
@@ -96,8 +101,13 @@ export interface ScheduleDay {
 export interface ReviewLoadDay {
   dateKey: string;
   label: string;
+  shortLabel?: string;
+  fullLabel?: string;
   dueCount: number;
   completedCount: number;
+  completedReviewCount?: number;
+  remainingTodayCount?: number;
+  futureDueCount?: number;
   isToday: boolean;
 }
 
@@ -113,4 +123,12 @@ export interface SubmitReviewInput {
   rating: ReviewRating;
   note?: string;
   requestId: string;
+}
+
+export interface CompleteUserProblemCard extends FsrsCardState {
+  problemId: string;
+  dueAt: string;
+  version: number;
+  firstAttemptedAt: string;
+  latestRating: ReviewRating;
 }

@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 const navigation = [
-  { href: "/today", label: "Daily Queue", icon: LayoutDashboard },
+  { href: "/today", label: "Today", icon: LayoutDashboard },
   { href: "/problems", label: "Problems", icon: BookOpenText },
   { href: "/schedule", label: "Schedule", icon: CalendarDays },
   { href: "/progress", label: "Progress", icon: BarChart3 },

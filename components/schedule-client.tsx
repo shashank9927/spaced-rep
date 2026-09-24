@@ -10,21 +10,20 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 
-type SchedulePayload = { month: string; todayKey: string; days: ScheduleDay[] };
+type SchedulePayload = { month: string; todayKey: string; days: ScheduleDay[]; agendaDays: ScheduleDay[] };
 const dateFor = (key: string) => new Date(`${key}T12:00:00.000Z`);
 const keyFor = (date: Date) => date.toISOString().slice(0, 10);
 const label = (key: string) => new Intl.DateTimeFormat("en", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" }).format(dateFor(key));
 function shift(month: string, amount: number) { const [year, value] = month.split("-").map(Number); const date = new Date(Date.UTC(year, value - 1 + amount, 1)); return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`; }
-function description(item: ScheduleItem) { return item.kind === "completed-attempt" ? "First attempt recorded" : item.kind === "completed-review" ? "Review complete" : item.status === "overdue" ? "Overdue review" : "Scheduled review"; }
+function description(item: ScheduleItem) { return item.kind === "completed-attempt" ? "First attempt recorded" : item.kind === "completed-early-review" ? "Early review complete" : item.kind === "completed-review" ? "Scheduled review complete" : item.status === "overdue" ? "Overdue review" : "Scheduled review"; }
 
 export function ScheduleClient({ data }: { data: SchedulePayload }) {
   const router = useRouter();
   const [showMonth, setShowMonth] = useState(false);
   const [selectedKey, setSelectedKey] = useState(data.todayKey);
   const [pending, startTransition] = useTransition();
-  const todayIndex = Math.max(0, data.days.findIndex((day) => day.dateKey === data.todayKey));
-  const agenda = data.days.slice(todayIndex, todayIndex + 14);
-  const selected = data.days.find((day) => day.dateKey === selectedKey) ?? agenda[0];
+  const agenda = data.agendaDays;
+  const selected = data.days.find((day) => day.dateKey === selectedKey) ?? agenda.find((day) => day.dateKey === selectedKey) ?? agenda[0];
   const modifiers = useMemo(() => ({
     review: data.days.filter((day) => day.items.some((item) => item.kind === "review" && item.status !== "completed")).map((day) => dateFor(day.dateKey)),
     completed: data.days.filter((day) => day.items.some((item) => item.status === "completed")).map((day) => dateFor(day.dateKey)),

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { isStrong, isWeak, queueOrder, reviewLoadForCards } from "@/lib/analytics";
+import { attentionProblems, isStrong, isWeak, progressSummary, queueOrder, reviewLoadForCards } from "@/lib/analytics";
 import type { StudyCard } from "@/lib/analytics";
+import type { ReviewLogSummary } from "@/lib/types";
 
 function card(overrides: Partial<StudyCard> = {}): StudyCard {
   return {
@@ -53,5 +54,23 @@ describe("study analytics", () => {
     expect(load.overdueCount).toBe(0);
     expect(load.totalDueNext14Days).toBe(0);
     expect(load.peakDay).toBeNull();
+  });
+
+  it("counts only scheduled, non-undone reviews for the recall sample", () => {
+    const logs: ReviewLogSummary[] = Array.from({ length: 20 }, (_, index) => ({
+      id: "scheduled-" + index, problem_id: card().id, rating: index === 0 ? "again" as const : "good" as const,
+      reviewed_at: "2026-09-24T10:00:00.000Z", note: null, previous_due_at: "2026-09-23T10:00:00.000Z",
+      next_due_at: "2026-09-27T10:00:00.000Z", scheduled_days: 3, event_kind: "scheduled_review" as const,
+    }));
+    logs.push({ id: "undone", problem_id: card().id, rating: "again", reviewed_at: "2026-09-24T10:00:00.000Z", note: null, previous_due_at: null, next_due_at: "2026-09-25T10:00:00.000Z", scheduled_days: 1, event_kind: "scheduled_review", reversed_at: "2026-09-24T10:01:00.000Z" });
+    const summary = progressSummary([card()], logs, "UTC", new Date("2026-09-24T12:00:00.000Z"));
+    expect(summary.scheduledRecallSampleSize).toBe(20);
+    expect(summary.scheduledRecallRate).toBeCloseTo(.95);
+  });
+
+  it("prioritizes due cards ahead of recent hard cards in reinforcement", () => {
+    const due = card({ id: "00000000-0000-4000-8000-000000000004", card: { ...card().card, due_at: "2026-09-24T20:00:00.000Z" } });
+    const hard = card({ id: "00000000-0000-4000-8000-000000000005", latest_rating: "hard", card: { ...card().card, due_at: "2026-09-29T20:00:00.000Z" } });
+    expect(attentionProblems([hard, due], new Date("2026-09-24T10:00:00.000Z"), "UTC")[0].id).toBe(due.id);
   });
 });

@@ -2,7 +2,7 @@ import "server-only";
 
 import { cache } from "react";
 import { z } from "zod";
-import { activityForDays, patternStats, queueOrder, reviewLoadForCards, reviewStats, type StudyCard } from "@/lib/analytics";
+import { activityForDays, attentionProblems, patternSignals, progressSummary, queueOrder, reviewLoadForCards, type StudyCard } from "@/lib/analytics";
 import { getProfile, type Profile } from "@/lib/auth";
 import { buildScheduleData, isDueOnOrBeforeLocalDay } from "@/lib/study-plan";
 import { retrievability } from "@/lib/scheduler";
@@ -11,8 +11,8 @@ import { leetcodeNumberFromSourceId } from "@/lib/utils";
 import { isAllowedExternalUrl } from "@/lib/security";
 import type { CatalogProblem, DueProblem, FsrsCardState, ProblemSummary, ReviewLogSummary, ReviewRating } from "@/lib/types";
 
-const CARD_SELECT = "due_at,stability,difficulty,elapsed_days,scheduled_days,learning_steps,reps,lapses,state,last_review_at,last_rating,version,first_attempted_at,problems(id,source_id,leetcode_number,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(topics(name)))";
-const LOG_SELECT = "id,problem_id,rating,reviewed_at,note,previous_due_at,next_due_at,scheduled_days,problems(title,difficulty,source_id,leetcode_number)";
+const CARD_SELECT = "due_at,stability,difficulty,elapsed_days,scheduled_days,learning_steps,reps,lapses,state,last_review_at,last_rating,version,first_attempted_at,problems(id,source_id,leetcode_number,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(position,is_primary,topics(name)))";
+const LOG_SELECT = "id,problem_id,rating,reviewed_at,note,previous_due_at,next_due_at,scheduled_days,event_kind,result_version,review_reversals(reversed_at),problems(title,difficulty,source_id,leetcode_number)";
 
 function topicsFrom(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -20,6 +20,14 @@ function topicsFrom(value: unknown): string[] {
     const topic = entry?.topics ?? entry?.topic;
     return typeof topic?.name === "string" ? [topic.name] : [];
   });
+}
+
+function primaryTopicFrom(value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+  const primary = value.find((entry: any) => entry?.is_primary);
+  const topic = primary?.topics ?? primary?.topic;
+  const resolved = Array.isArray(topic) ? topic[0] : topic;
+  return typeof resolved?.name === "string" ? resolved.name : topicsFrom(value)[0] ?? null;
 }
 
 function approvedLink(value: unknown, host: string) {
@@ -43,6 +51,7 @@ function toProblem(value: any): ProblemSummary {
     leetcode_url: approvedLink(value.leetcode_url, "leetcode.com"),
     neetcode_url: approvedLink(value.neetcode_url, "neetcode.io"),
     topics: topicsFrom(value.problem_topics),
+    primaryTopic: primaryTopicFrom(value.problem_topics),
   };
 }
 
@@ -65,10 +74,10 @@ function toCardState(row: any): FsrsCardState & { due_at: string; version: numbe
 }
 
 function mapLogs(rows: any[]): ReviewLogSummary[] {
-  return rows.map((row) => ({
-    ...row,
-    problems: Array.isArray(row.problems) ? row.problems[0] ?? null : row.problems,
-  })) as ReviewLogSummary[];
+  return rows.map((row) => {
+    const reversal = Array.isArray(row.review_reversals) ? row.review_reversals[0] : row.review_reversals;
+    return { ...row, event_kind: row.event_kind ?? (row.previous_due_at ? "scheduled_review" : "first_attempt"), reversed_at: reversal?.reversed_at ?? null, problems: Array.isArray(row.problems) ? row.problems[0] ?? null : row.problems };
+  }) as ReviewLogSummary[];
 }
 
 const readCards = cache(async () => {
@@ -78,12 +87,12 @@ const readCards = cache(async () => {
   return data ?? [];
 });
 
-// Analytics only needs a bounded look-back window. Detailed history has its own
-// per-problem query, so normal navigation never fetches a user's whole log.
+// Normal screens only need a 90-day analytical window. Detailed history has
+// its own per-problem reader, so settings/admin never load study history.
 const readRecentLogs = cache(async (): Promise<ReviewLogSummary[]> => {
   const supabase = await createClient();
   const since = new Date();
-  since.setUTCDate(since.getUTCDate() - 366);
+  since.setUTCDate(since.getUTCDate() - 90);
   const { data, error } = await supabase.from("review_logs").select(LOG_SELECT).gte("reviewed_at", since.toISOString()).order("reviewed_at", { ascending: false }).limit(800);
   if (error) throw error;
   return mapLogs(data ?? []);
@@ -140,7 +149,7 @@ const cardSnapshot = cache(async () => {
 const catalogRows = cache(async (catalogId: Profile["selected_catalog"]) => {
   const supabase = await createClient();
   const { data, error } = await supabase.from("catalog_problems")
-    .select("sort_order,problems(id,source_id,leetcode_number,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(topics(name)))")
+    .select("sort_order,problems(id,source_id,leetcode_number,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(position,is_primary,topics(name)))")
     .eq("catalog_slug", catalogId)
     .order("sort_order");
   if (error) throw error;
@@ -192,7 +201,7 @@ export async function getTodayData() {
     ...snapshot,
     due,
     upcoming,
-    stats: reviewStats(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now),
+    stats: progressSummary(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now),
   };
 }
 
@@ -218,7 +227,7 @@ export async function getProblemDetail(problemId: string) {
   if (!z.string().uuid().safeParse(problemId).success) return null;
   const supabase = await createClient();
   const [problemResult, snapshot, logs] = await Promise.all([
-    supabase.from("problems").select("id,source_id,leetcode_number,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(topics(name))").eq("id", problemId).maybeSingle(),
+    supabase.from("problems").select("id,source_id,leetcode_number,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(position,is_primary,topics(name))").eq("id", problemId).maybeSingle(),
     cardSnapshot(),
     readLogsForProblem(problemId),
   ]);
@@ -236,7 +245,7 @@ export async function getProblemDetail(problemId: string) {
 export async function getPatternsData() {
   const snapshot = await studySnapshot();
   if (!snapshot) return null;
-  return { ...snapshot, patterns: patternStats(snapshot.cards), stats: reviewStats(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now) };
+  return { ...snapshot, patterns: patternSignals(snapshot.cards, snapshot.now, snapshot.profile.timezone), stats: progressSummary(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now) };
 }
 
 export async function getProgressData() {
@@ -244,8 +253,9 @@ export async function getProgressData() {
   if (!snapshot) return null;
   return {
     ...snapshot,
-    stats: reviewStats(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now),
-    patterns: patternStats(snapshot.cards),
+    stats: progressSummary(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now),
+    attention: attentionProblems(snapshot.cards, snapshot.now, snapshot.profile.timezone),
+    patterns: patternSignals(snapshot.cards, snapshot.now, snapshot.profile.timezone),
     activity: activityForDays(snapshot.logs, snapshot.profile.timezone, snapshot.now, 28),
     reviewLoad: reviewLoadForCards(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now),
   };

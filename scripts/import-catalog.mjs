@@ -32,6 +32,9 @@ const memberships = (slug) => snapshot.problems.filter((problem) => problem.cata
 if (memberships("neetcode150").length !== 150) throw new Error("Catalog snapshot must contain exactly 150 NeetCode 150 memberships.");
 if (memberships("neetcode250").length !== 250) throw new Error("Catalog snapshot must contain exactly 250 NeetCode 250 memberships.");
 for (const problem of snapshot.problems) {
+  if (!Array.isArray(problem.topics) || problem.topics.length === 0) {
+    throw new Error(`Catalog problem ${problem.sourceId} has no primary topic.`);
+  }
   for (const value of [problem.leetcodeUrl, problem.neetcodeUrl].filter(Boolean)) {
     const parsed = new URL(value);
     const allowed = parsed.hostname === "leetcode.com" || parsed.hostname.endsWith(".leetcode.com") || parsed.hostname === "neetcode.io" || parsed.hostname.endsWith(".neetcode.io");
@@ -87,6 +90,9 @@ if (topicNames.length) {
   await assert("Importing topics", supabase.from("topics").upsert(topicNames.map((name) => ({ name })), { onConflict: "name" }));
   const topicRows = await assert("Reading imported topics", supabase.from("topics").select("id,name").in("name", topicNames));
   const topicId = new Map(topicRows.map((row) => [row.name, row.id]));
+  // Rebuild metadata links as a set, so each problem has exactly one durable
+  // primary topic. This never touches user cards or review history.
+  for (const [index, chunk] of chunks([...problemId.values()]).entries()) await assert(`Clearing topic links batch ${index + 1}`, supabase.from("problem_topics").delete().in("problem_id", chunk));
   const links = snapshot.problems.flatMap((problem) => problem.topics.map((topic, position) => ({ problem_id: problemId.get(problem.sourceId), topic_id: topicId.get(topic), position, is_primary: position === 0 }))).filter((link) => link.problem_id && link.topic_id);
   for (const [index, chunk] of chunks(links).entries()) await assert(`Linking problem topics batch ${index + 1}`, supabase.from("problem_topics").upsert(chunk, { onConflict: "problem_id,topic_id" }));
 }

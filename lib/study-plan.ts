@@ -65,11 +65,13 @@ export function buildScheduleData({ month, cards, logs, now, timezone }: {
   }
 
   for (const log of logs) {
+    if (log.reversed_at) continue;
     const dateKey = localDateKey(new Date(log.reviewed_at), timezone);
     if (dateKey < startKey || dateKey > endKey || !log.problems) continue;
+    const eventKind = log.event_kind ?? (log.previous_due_at ? "scheduled_review" : "first_attempt");
     addItem(days, {
       dateKey,
-      kind: log.previous_due_at ? "completed-review" : "completed-attempt",
+      kind: eventKind === "first_attempt" ? "completed-attempt" : eventKind === "early_review" ? "completed-early-review" : "completed-review",
       status: "completed",
       dueAt: log.reviewed_at,
       problem: {
