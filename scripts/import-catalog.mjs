@@ -42,6 +42,33 @@ for (const problem of snapshot.problems) {
 console.log(`Connecting to ${new URL(url).host}…`);
 await assert("Saving the catalog snapshot", supabase.from("catalog_snapshots").upsert({ version: snapshot.version, source: snapshot.source, source_url: snapshot.sourceUrl, problem_count: snapshot.problems.length }, { onConflict: "version" }));
 const payload = snapshot.problems.map((problem, index) => ({ source_id: problem.sourceId, leetcode_number: leetcodeNumbers[index], slug: problem.slug, title: problem.title, difficulty: problem.difficulty, leetcode_url: problem.leetcodeUrl, neetcode_url: problem.neetcodeUrl, metadata_version: snapshot.version, is_active: true }));
+// Older imports may have a harmless formatting difference in source_id (for
+// example a trailing slash) while retaining the same LeetCode number. Reuse
+// that row's UUID so user cards and review logs remain attached to the problem.
+const existingProblems = [];
+for (let from = 0; ; from += 500) {
+  const rows = await assert(`Reading existing problem IDs starting at ${from + 1}`, supabase.from("problems").select("id,source_id,leetcode_number").order("leetcode_number").range(from, from + 499));
+  existingProblems.push(...rows);
+  if (rows.length < 500) break;
+}
+const byExistingNumber = new Map(existingProblems.map((row) => [row.leetcode_number, row]));
+const byExistingSource = new Map(existingProblems.map((row) => [row.source_id, row]));
+for (const problem of payload) {
+  const existingByNumber = byExistingNumber.get(problem.leetcode_number);
+  const existingBySource = byExistingSource.get(problem.source_id);
+  if (existingBySource && existingBySource.leetcode_number !== problem.leetcode_number) {
+    throw new Error(`Existing problem ${problem.source_id} has a conflicting LeetCode number. Resolve it before importing.`);
+  }
+  if (existingByNumber && existingByNumber.source_id !== problem.source_id) {
+    if (existingBySource && existingBySource.id !== existingByNumber.id) {
+      throw new Error(`Existing catalog rows conflict for LeetCode number ${problem.leetcode_number}. Resolve duplicate source IDs before importing.`);
+    }
+    await assert(`Reconciling LeetCode #${problem.leetcode_number}`, supabase.from("problems").update(problem).eq("id", existingByNumber.id));
+    byExistingSource.delete(existingByNumber.source_id);
+    byExistingSource.set(problem.source_id, existingByNumber);
+    existingByNumber.source_id = problem.source_id;
+  }
+}
 for (const [index, chunk] of chunks(payload).entries()) await assert(`Importing problem batch ${index + 1}`, supabase.from("problems").upsert(chunk, { onConflict: "source_id" }));
 const problemRows = [];
 for (let from = 0; ; from += 500) {
