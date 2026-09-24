@@ -35,7 +35,7 @@ const profileSettingsSchema = z.object({
 
 async function saveProfileSettings(profile: Profile, input: z.infer<typeof profileSettingsSchema>, onboardingCompleted: boolean) {
   const admin = createAdminClient();
-  return admin.rpc("save_profile_settings_internal", {
+  return admin.rpc("save_profile_settings_service", {
     p_user_id: profile.id,
     p_display_name: input.displayName,
     p_timezone: input.timezone,
@@ -152,7 +152,7 @@ export async function submitReview(input: SubmitReviewInput): Promise<ReviewActi
     last_review: next.last_review_at,
   }, now);
   const admin = createAdminClient();
-  const { error } = await admin.rpc("submit_review_internal", {
+  const { error } = await admin.rpc("submit_review_service", {
     p_user_id: profile.id,
     p_problem_id: parsed.data.problemId,
     p_request_id: parsed.data.requestId,

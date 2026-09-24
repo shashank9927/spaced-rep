@@ -11,7 +11,7 @@ create or replace function public.save_profile_settings_internal(
 language plpgsql security definer set search_path = public, pg_temp
 as $$
 begin
-  if coalesce(current_setting('request.jwt.claim.role', true), '') <> 'service_role' then
+  if coalesce(nullif(current_setting('request.jwt.claim.role', true), ''), nullif(current_setting('role', true), ''), '') <> 'service_role' then
     raise exception 'not authorized' using errcode = '42501';
   end if;
   if not exists (
@@ -75,7 +75,7 @@ declare
   current_version integer;
   inserted_log_id uuid;
 begin
-  if coalesce(current_setting('request.jwt.claim.role', true), '') <> 'service_role' then
+  if coalesce(nullif(current_setting('request.jwt.claim.role', true), ''), nullif(current_setting('role', true), ''), '') <> 'service_role' then
     raise exception 'not authorized' using errcode = '42501';
   end if;
   if p_user_id is null or p_problem_id is null or p_request_id is null then
