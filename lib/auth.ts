@@ -6,6 +6,7 @@ import type { User } from "@supabase/supabase-js";
 import { displayNameFromEmail } from "@/lib/utils";
 import { createAdminClient, createClient } from "@/lib/supabase/server";
 import { requestCorrelationId } from "@/lib/security";
+import { measure } from "@/lib/performance";
 
 export interface Profile {
   id: string;
@@ -17,11 +18,22 @@ export interface Profile {
   is_active: boolean;
 }
 
-export const getProfile = cache(async (): Promise<Profile | null> => {
+export const getSessionClaims = cache(async () => {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
-  const { data } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
+  const result = await measure("auth.claims", () => supabase.auth.getClaims());
+  const claims = result.data?.claims;
+  if (result.error || !claims?.sub) return null;
+  return claims;
+});
+
+export const getProfile = cache(async (): Promise<Profile | null> => {
+  const claims = await getSessionClaims();
+  if (!claims?.sub) return null;
+  const supabase = await createClient();
+  const { data } = await measure("profile.read", () => supabase.from("profiles")
+    .select("id,email,display_name,timezone,selected_catalog,role,is_active")
+    .eq("id", claims.sub)
+    .maybeSingle());
   return data as Profile | null;
 });
 

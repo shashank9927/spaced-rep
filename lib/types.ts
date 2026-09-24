@@ -49,6 +49,86 @@ export interface CatalogProblem extends ProblemSummary {
   } | null;
 }
 
+/** The compact, browser-safe shape used by the problem deck and search. */
+export interface CatalogProblemSummary {
+  id: string;
+  leetcodeNumber: number;
+  title: string;
+  difficulty: ProblemDifficulty;
+  topics: string[];
+  primaryTopic?: string | null;
+  sort_order: number;
+  card?: CatalogProblem["card"];
+}
+
+export interface TodayPayload {
+  timezone: string;
+  dueReviews: DueProblem[];
+  upcomingReviews: DueProblem[];
+  firstAttemptsThisWeek: number;
+  completedReviewsThisWeek: number;
+  activeProblemCount: number;
+  medianIntervalDays: number | null;
+}
+
+export interface ProblemDeckPayload {
+  catalogId: CatalogId;
+  problems: CatalogProblemSummary[];
+  activeCount: number;
+  dueCount: number;
+}
+
+export interface ScheduleAgendaPayload {
+  todayKey: string;
+  days: ScheduleDay[];
+}
+
+/** Browser-safe Progress DTO: it deliberately excludes raw cards and logs. */
+export interface AttentionProblem {
+  id: string;
+  leetcodeNumber: number;
+  title: string;
+  topics: string[];
+  primaryTopic?: string | null;
+  reason: "due" | "forgot" | "hard" | "repeated-lapses";
+  scheduledDays: number;
+  dueAt: string;
+}
+
+export interface ProgressSummary {
+  activeProblemCount: number;
+  medianIntervalDays: number | null;
+  firstAttemptsThisWeek: number;
+  completedReviewsThisWeek: number;
+  scheduledRecallRate: number | null;
+  scheduledRecallSampleSize: number;
+}
+
+export interface ActivityDay {
+  key: string;
+  attempts: number;
+  scheduled: number;
+  early: number;
+}
+
+export interface PatternSignal {
+  name: string;
+  activeCount: number;
+  dueCount: number;
+  reinforcementCount: number;
+  medianIntervalDays: number | null;
+}
+
+export interface ProgressPayload {
+  timezone: string;
+  hasCards: boolean;
+  stats: ProgressSummary;
+  reviewLoad: ReviewLoadPayload;
+  activity: ActivityDay[];
+  attention: AttentionProblem[];
+  patterns: PatternSignal[];
+}
+
 export interface DueProblem extends ProblemSummary {
   card: FsrsCardState & {
     due_at: string;

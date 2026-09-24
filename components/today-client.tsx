@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { ArrowRight, CalendarDays, CheckCircle2, ChevronRight, Play, Search } from "lucide-react";
-import type { StudyCard } from "@/lib/analytics";
+import type { DueProblem } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatRelativeDue, localDateKey } from "@/lib/utils";
@@ -21,7 +21,7 @@ function dueLabel(dueAt: string, timezone: string) {
   return formatRelativeDue(dueAt);
 }
 
-export function TodayClient({ initialDue, upcoming, stats, timezone }: { initialDue: StudyCard[]; upcoming: StudyCard[]; stats: Stats; timezone: string }) {
+export function TodayClient({ initialDue, upcoming, stats, timezone }: { initialDue: DueProblem[]; upcoming: DueProblem[]; stats: Stats; timezone: string }) {
   const router = useRouter();
   const preview = upcoming.slice(0, 3);
 

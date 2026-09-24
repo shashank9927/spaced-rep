@@ -4,11 +4,21 @@ import { NextResponse, type NextRequest } from "next/server";
 export async function proxy(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
   const nonce = crypto.randomUUID().replaceAll("-", "");
+  const requestId = crypto.randomUUID();
   requestHeaders.set("x-nonce", nonce);
+  requestHeaders.set("x-request-id", requestId);
+  requestHeaders.set("x-route", request.nextUrl.pathname);
   let response = NextResponse.next({ request: { headers: requestHeaders } });
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-  if (url && key) {
+  // Public pages still receive the security headers below, but only protected
+  // routes need a session refresh. Avoiding Auth work for public/static
+  // navigation keeps the proxy out of the critical path where possible.
+  const protectedPaths = ["/", "/today", "/problems", "/review", "/schedule", "/progress", "/settings", "/admin", "/onboarding", "/dashboard", "/catalog", "/history", "/insights", "/patterns"];
+  const shouldRefreshSession = protectedPaths.some((path) => path === "/"
+    ? request.nextUrl.pathname === path
+    : request.nextUrl.pathname === path || request.nextUrl.pathname.startsWith(`${path}/`));
+  if (url && key && shouldRefreshSession) {
     const supabase = createServerClient(url, key, {
       cookies: {
         getAll: () => request.cookies.getAll(),
@@ -25,7 +35,9 @@ export async function proxy(request: NextRequest) {
         },
       },
     });
-    await supabase.auth.getUser();
+    // getClaims validates asymmetric JWTs against a cached JWKS instead of
+    // making getUser's Auth request on every RSC navigation.
+    await supabase.auth.getClaims();
   }
 
   response.headers.set("X-Content-Type-Options", "nosniff");

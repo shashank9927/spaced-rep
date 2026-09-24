@@ -4,16 +4,16 @@ import * as Popover from "@radix-ui/react-popover";
 import Link from "next/link";
 import { useCallback, useMemo, useState } from "react";
 import { ArrowUpRight, ChevronDown, Filter, Search } from "lucide-react";
-import type { CatalogProblem } from "@/lib/types";
+import type { CatalogProblemSummary } from "@/lib/types";
 import { cn, formatRelativeDue, localDateKey } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 type StatusFilter = "all" | "due" | "new";
 
-function DifficultyBadge({ difficulty }: { difficulty: CatalogProblem["difficulty"] }) { return <Badge variant={difficulty.toLowerCase() as "easy" | "medium" | "hard"}>{difficulty}</Badge>; }
+function DifficultyBadge({ difficulty }: { difficulty: CatalogProblemSummary["difficulty"] }) { return <Badge variant={difficulty.toLowerCase() as "easy" | "medium" | "hard"}>{difficulty}</Badge>; }
 
-export function CatalogClient({ initialStatus = "all", initialTopic = "all", problems, timezone }: { initialStatus?: StatusFilter; initialTopic?: string; problems: CatalogProblem[]; timezone: string }) {
+export function CatalogClient({ initialStatus = "all", initialTopic = "all", problems, timezone, counts }: { initialStatus?: StatusFilter; initialTopic?: string; problems: CatalogProblemSummary[]; timezone: string; counts?: { active: number; due: number } }) {
   const [search, setSearch] = useState("");
   const [difficulty, setDifficulty] = useState("all");
   const [topic, setTopic] = useState(initialTopic);
@@ -22,8 +22,10 @@ export function CatalogClient({ initialStatus = "all", initialTopic = "all", pro
   const [now] = useState(() => Date.now());
   const topics = useMemo(() => Array.from(new Set(problems.flatMap((problem) => problem.topics))).sort(), [problems]);
   const dueOnToday = useCallback((dueAt: string) => localDateKey(new Date(dueAt), timezone) <= localDateKey(new Date(now), timezone), [now, timezone]);
-  const dueCount = useMemo(() => problems.filter((problem) => problem.card && dueOnToday(problem.card.due_at)).length, [dueOnToday, problems]);
-  const activeCount = useMemo(() => problems.filter((problem) => problem.card).length, [problems]);
+  const computedDueCount = useMemo(() => problems.filter((problem) => problem.card && dueOnToday(problem.card.due_at)).length, [dueOnToday, problems]);
+  const computedActiveCount = useMemo(() => problems.filter((problem) => problem.card).length, [problems]);
+  const dueCount = counts?.due ?? computedDueCount;
+  const activeCount = counts?.active ?? computedActiveCount;
   const filtered = useMemo(() => problems.filter((problem) => {
     const isDue = Boolean(problem.card && dueOnToday(problem.card.due_at));
     return (status === "all" || status === "due" && isDue || status === "new" && !problem.card)

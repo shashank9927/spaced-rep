@@ -1,24 +1,33 @@
 import "server-only";
 
 import { cache } from "react";
+import { unstable_cache } from "next/cache";
 import { z } from "zod";
-import { activityForDays, attentionProblems, patternSignals, progressSummary, queueOrder, reviewLoadForCards, type StudyCard } from "@/lib/analytics";
+import { activityForDays, attentionProblems, attentionReason, median, patternSignals, progressSummary, queueOrder, reviewLoadForCards, weekStartKey, type StudyCard } from "@/lib/analytics";
 import { getProfile, type Profile } from "@/lib/auth";
+import { measure } from "@/lib/performance";
 import { buildScheduleData, isDueOnOrBeforeLocalDay } from "@/lib/study-plan";
 import { retrievability } from "@/lib/scheduler";
 import { createAdminClient, createClient } from "@/lib/supabase/server";
 import { leetcodeNumberFromSourceId } from "@/lib/utils";
 import { isAllowedExternalUrl } from "@/lib/security";
-import type { CatalogProblem, DueProblem, FsrsCardState, ProblemSummary, ReviewLogSummary, ReviewRating } from "@/lib/types";
+import type { CatalogId, CatalogProblemSummary, DueProblem, FsrsCardState, ProblemDeckPayload, ProblemSummary, ProgressPayload, ReviewLogSummary, ReviewRating, ScheduleAgendaPayload, TodayPayload } from "@/lib/types";
 
 const CARD_SELECT = "due_at,stability,difficulty,elapsed_days,scheduled_days,learning_steps,reps,lapses,state,last_review_at,last_rating,version,first_attempted_at,problems(id,source_id,leetcode_number,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(position,is_primary,topics(name)))";
-const LOG_SELECT = "id,problem_id,rating,reviewed_at,note,previous_due_at,next_due_at,scheduled_days,event_kind,result_version,review_reversals(reversed_at),problems(title,difficulty,source_id,leetcode_number)";
+const CARD_SUMMARY_SELECT = "problem_id,due_at,reps,last_review_at,last_rating,lapses,scheduled_days,first_attempted_at";
+const ANALYTICS_LOG_SELECT = "id,problem_id,rating,reviewed_at,previous_due_at,next_due_at,scheduled_days,event_kind,result_version,review_reversals(reversed_at)";
+const HISTORY_LOG_SELECT = "id,problem_id,rating,reviewed_at,note,previous_due_at,next_due_at,scheduled_days,event_kind,result_version,review_reversals(reversed_at),problems(title,difficulty,source_id,leetcode_number)";
+const SCHEDULE_LOG_SELECT = "problem_id,reviewed_at,previous_due_at,event_kind,review_reversals(reversed_at),problems(title,difficulty,source_id,leetcode_number)";
+const CATALOG_SELECT = "sort_order,problems(id,source_id,leetcode_number,title,difficulty,problem_topics(position,is_primary,topics(name)))";
+
+type CardRow = Record<string, any>;
 
 function topicsFrom(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry: any) => {
     const topic = entry?.topics ?? entry?.topic;
-    return typeof topic?.name === "string" ? [topic.name] : [];
+    const resolved = Array.isArray(topic) ? topic[0] : topic;
+    return typeof resolved?.name === "string" ? [resolved.name] : [];
   });
 }
 
@@ -45,7 +54,7 @@ function toProblem(value: any): ProblemSummary {
     id: value.id,
     source_id: value.source_id,
     leetcodeNumber: value.leetcode_number ?? leetcodeNumberFromSourceId(value.source_id),
-    slug: value.slug,
+    slug: value.slug ?? value.source_id,
     title: value.title,
     difficulty: value.difficulty,
     leetcode_url: approvedLink(value.leetcode_url, "leetcode.com"),
@@ -55,7 +64,18 @@ function toProblem(value: any): ProblemSummary {
   };
 }
 
-function toCardState(row: any): FsrsCardState & { due_at: string; version: number; first_attempted_at: string } {
+function toCatalogProblem(value: any): Omit<CatalogProblemSummary, "sort_order" | "card"> {
+  return {
+    id: value.id,
+    leetcodeNumber: value.leetcode_number ?? leetcodeNumberFromSourceId(value.source_id),
+    title: value.title,
+    difficulty: value.difficulty,
+    topics: topicsFrom(value.problem_topics),
+    primaryTopic: primaryTopicFrom(value.problem_topics),
+  };
+}
+
+function toCardState(row: CardRow): FsrsCardState & { due_at: string; version: number; first_attempted_at: string } {
   return {
     due: row.due_at,
     due_at: row.due_at,
@@ -80,39 +100,7 @@ function mapLogs(rows: any[]): ReviewLogSummary[] {
   }) as ReviewLogSummary[];
 }
 
-const readCards = cache(async () => {
-  const supabase = await createClient();
-  const { data, error } = await supabase.from("user_problem_cards").select(CARD_SELECT);
-  if (error) throw error;
-  return data ?? [];
-});
-
-// Normal screens only need a 90-day analytical window. Detailed history has
-// its own per-problem reader, so settings/admin never load study history.
-const readRecentLogs = cache(async (): Promise<ReviewLogSummary[]> => {
-  const supabase = await createClient();
-  const since = new Date();
-  since.setUTCDate(since.getUTCDate() - 90);
-  const { data, error } = await supabase.from("review_logs").select(LOG_SELECT).gte("reviewed_at", since.toISOString()).order("reviewed_at", { ascending: false }).limit(800);
-  if (error) throw error;
-  return mapLogs(data ?? []);
-});
-
-async function readLogsForProblem(problemId: string): Promise<ReviewLogSummary[]> {
-  const supabase = await createClient();
-  const { data, error } = await supabase.from("review_logs").select(LOG_SELECT).eq("problem_id", problemId).order("reviewed_at", { ascending: false }).limit(250);
-  if (error) throw error;
-  return mapLogs(data ?? []);
-}
-
-async function readLogsInRange(start: string, endExclusive: string): Promise<ReviewLogSummary[]> {
-  const supabase = await createClient();
-  const { data, error } = await supabase.from("review_logs").select(LOG_SELECT).gte("reviewed_at", start).lt("reviewed_at", endExclusive).order("reviewed_at", { ascending: false });
-  if (error) throw error;
-  return mapLogs(data ?? []);
-}
-
-function enrichCards(rows: any[], logs: ReviewLogSummary[], now = new Date()): StudyCard[] {
+function enrichCards(rows: CardRow[], logs: ReviewLogSummary[] = [], now = new Date()): StudyCard[] {
   const latestByProblem = new Map<string, ReviewLogSummary>();
   for (const log of logs) if (!latestByProblem.has(log.problem_id)) latestByProblem.set(log.problem_id, log);
   return rows.flatMap((row) => {
@@ -120,149 +108,199 @@ function enrichCards(rows: any[], logs: ReviewLogSummary[], now = new Date()): S
     const card = toCardState(row);
     const latest = latestByProblem.get(row.problems.id);
     return [{
-      ...toProblem(row.problems),
-      card,
-      retrievability: retrievability(card, now),
+      ...toProblem(row.problems), card, retrievability: retrievability(card, now),
       latest_rating: (latest?.rating as ReviewRating | undefined) ?? (row.last_rating as ReviewRating | undefined) ?? null,
       latest_note: latest?.note ?? null,
-      latest_reviewed_at: latest?.reviewed_at ?? null,
+      latest_reviewed_at: latest?.reviewed_at ?? row.last_review_at ?? null,
     } satisfies StudyCard];
   });
 }
 
-const studySnapshot = cache(async () => {
-  const profile = await getProfile();
-  if (!profile) return null;
-  const [rows, logs] = await Promise.all([readCards(), readRecentLogs()]);
-  const now = new Date();
-  return { profile, cards: enrichCards(rows, logs, now), logs, now };
-});
-
-const cardSnapshot = cache(async () => {
-  const profile = await getProfile();
-  if (!profile) return null;
-  const rows = await readCards();
-  const now = new Date();
-  return { profile, rows, cards: enrichCards(rows, [], now), now };
-});
-
-const catalogRows = cache(async (catalogId: Profile["selected_catalog"]) => {
+const readStudyCards = cache(async () => {
   const supabase = await createClient();
-  const { data, error } = await supabase.from("catalog_problems")
-    .select("sort_order,problems(id,source_id,leetcode_number,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(position,is_primary,topics(name)))")
-    .eq("catalog_slug", catalogId)
-    .order("sort_order");
+  const { data, error } = await measure("cards.read", () => supabase.from("user_problem_cards").select(CARD_SELECT));
   if (error) throw error;
   return data ?? [];
 });
 
-async function catalogProblemsForSnapshot(catalogId: Profile["selected_catalog"], cards: StudyCard[]) {
-  const data = await catalogRows(catalogId);
-  const cardsByProblem = new Map(cards.map((card) => [card.id, card]));
-  return data.flatMap((row: any) => {
-    if (!row.problems) return [];
-    const card = cardsByProblem.get(row.problems.id);
-    return [{
-      ...toProblem(row.problems),
-      sort_order: row.sort_order,
-      card: card ? {
-        due_at: card.card.due_at,
-        reps: card.card.reps,
-        last_review_at: card.card.last_review ?? null,
-        stability: card.card.stability,
-        lapses: card.card.lapses,
-        scheduled_days: card.card.scheduled_days,
-        first_attempted_at: card.card.first_attempted_at,
-        retrievability: card.retrievability,
-        latest_rating: card.latest_rating,
-      } : null,
-    } satisfies CatalogProblem];
-  });
+const readCardSummaries = cache(async () => {
+  const supabase = await createClient();
+  const { data, error } = await measure("cards.summary", () => supabase.from("user_problem_cards").select(CARD_SUMMARY_SELECT));
+  if (error) throw error;
+  return data ?? [];
+});
+
+const readAnalyticsLogs = cache(async (since: string) => {
+  const supabase = await createClient();
+  const { data, error } = await measure("logs.analytics", () => supabase.from("review_logs").select(ANALYTICS_LOG_SELECT).gte("reviewed_at", since).order("reviewed_at", { ascending: false }).limit(800));
+  if (error) throw error;
+  return mapLogs(data ?? []);
+});
+
+const readLogsForProblem = cache(async (problemId: string, before?: string) => {
+  const supabase = await createClient();
+  let query = supabase.from("review_logs").select(HISTORY_LOG_SELECT).eq("problem_id", problemId).order("reviewed_at", { ascending: false }).limit(20);
+  if (before) query = query.lt("reviewed_at", before);
+  const { data, error } = await measure("logs.problem", () => query, { pageSize: 20 });
+  if (error) throw error;
+  return mapLogs(data ?? []);
+});
+
+const readLogsInRange = cache(async (start: string, endExclusive: string) => {
+  const supabase = await createClient();
+  // Schedule needs only event timing and a display label. Never ship private
+  // notes or full review history just to paint calendar entries.
+  const { data, error } = await measure("logs.range", () => supabase.from("review_logs").select(SCHEDULE_LOG_SELECT).gte("reviewed_at", start).lt("reviewed_at", endExclusive).order("reviewed_at", { ascending: false }));
+  if (error) throw error;
+  return mapLogs(data ?? []);
+});
+
+function cachedCatalogRows(catalogId: CatalogId) {
+  return unstable_cache(async () => {
+    const supabase = createAdminClient();
+    const { data, error } = await measure("catalog.shared", () => supabase.from("catalog_problems").select(CATALOG_SELECT).eq("catalog_slug", catalogId).order("sort_order"), { catalogId });
+    if (error) throw error;
+    return data ?? [];
+  }, ["catalog-summary", catalogId], { revalidate: 21_600, tags: [`catalog:${catalogId}`] })();
 }
 
-export async function getCatalogProblems(catalogId: Profile["selected_catalog"]): Promise<CatalogProblem[]> {
-  const snapshot = await cardSnapshot();
-  return catalogProblemsForSnapshot(catalogId, snapshot?.cards ?? []);
-}
+const catalogRows = cache(cachedCatalogRows);
 
-export async function getDueQueue(): Promise<DueProblem[]> {
-  const snapshot = await cardSnapshot();
-  if (!snapshot) return [];
-  return snapshot.cards.filter((card) => isDueOnOrBeforeLocalDay(card.card.due_at, snapshot.now, snapshot.profile.timezone)).sort(queueOrder);
-}
-
-export async function getTodayData() {
-  const snapshot = await studySnapshot();
-  if (!snapshot) return null;
-  const due = snapshot.cards.filter((card) => isDueOnOrBeforeLocalDay(card.card.due_at, snapshot.now, snapshot.profile.timezone)).sort(queueOrder);
-  const upcoming = snapshot.cards.filter((card) => !isDueOnOrBeforeLocalDay(card.card.due_at, snapshot.now, snapshot.profile.timezone))
-    .sort((a, b) => new Date(a.card.due_at).getTime() - new Date(b.card.due_at).getTime());
+function todayStats(cards: StudyCard[], logs: ReviewLogSummary[], timezone: string, now: Date) {
+  const start = weekStartKey(now, timezone);
+  const thisWeek = logs.filter((log) => !log.reversed_at && new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date(log.reviewed_at)) >= start);
   return {
-    ...snapshot,
-    due,
-    upcoming,
-    stats: progressSummary(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now),
+    firstAttemptsThisWeek: thisWeek.filter((log) => log.event_kind === "first_attempt").length,
+    completedReviewsThisWeek: thisWeek.filter((log) => log.event_kind !== "first_attempt").length,
+    activeProblemCount: cards.length,
+    medianIntervalDays: median(cards.map((card) => card.card.scheduled_days).filter((days) => days > 0)),
   };
 }
 
-// Backward-compatible name while pages move to the smaller Today model.
+export async function getTodayData(): Promise<TodayPayload | null> {
+  const now = new Date();
+  const [profile, rows, logs] = await Promise.all([getProfile(), readStudyCards(), readAnalyticsLogs(new Date(now.getTime() - 8 * 86_400_000).toISOString())]);
+  if (!profile) return null;
+  const cards = enrichCards(rows, [], now);
+  const due = cards.filter((card) => isDueOnOrBeforeLocalDay(card.card.due_at, now, profile.timezone)).sort(queueOrder);
+  const upcoming = cards.filter((card) => !isDueOnOrBeforeLocalDay(card.card.due_at, now, profile.timezone)).sort((a, b) => new Date(a.card.due_at).getTime() - new Date(b.card.due_at).getTime()).slice(0, 3);
+  return { timezone: profile.timezone, dueReviews: due, upcomingReviews: upcoming, ...todayStats(cards, logs, profile.timezone, now) };
+}
+
 export const getDashboardData = getTodayData;
 
+export async function getCatalogProblems(catalogId: CatalogId): Promise<ProblemDeckPayload> {
+  const [rows, cardRows, profile] = await Promise.all([catalogRows(catalogId), readCardSummaries(), getProfile()]);
+  const cards = new Map(cardRows.map((card: any) => [card.problem_id, card]));
+  const problems = rows.flatMap((row: any) => {
+    if (!row.problems) return [];
+    const card = cards.get(row.problems.id);
+    return [{ ...toCatalogProblem(row.problems), sort_order: row.sort_order, card: card ? {
+      due_at: card.due_at, reps: card.reps, last_review_at: card.last_review_at, lapses: card.lapses,
+      scheduled_days: card.scheduled_days, first_attempted_at: card.first_attempted_at, latest_rating: card.last_rating,
+    } : null } satisfies CatalogProblemSummary];
+  });
+  const now = new Date();
+  const dueCount = profile ? problems.filter((problem) => problem.card && isDueOnOrBeforeLocalDay(problem.card.due_at, now, profile.timezone)).length : 0;
+  return { catalogId, problems, activeCount: cardRows.length, dueCount };
+}
+
+export async function getDueQueue(): Promise<DueProblem[]> {
+  const [profile, rows] = await Promise.all([getProfile(), readStudyCards()]);
+  if (!profile) return [];
+  const now = new Date();
+  return enrichCards(rows, [], now).filter((card) => isDueOnOrBeforeLocalDay(card.card.due_at, now, profile.timezone)).sort(queueOrder);
+}
+
+function localMonth(now: Date, timezone: string) {
+  const parts = new Intl.DateTimeFormat("en", { timeZone: timezone, year: "numeric", month: "2-digit" }).formatToParts(now);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  return `${year}-${month}`;
+}
+
+export async function getScheduleAgendaData(): Promise<ScheduleAgendaPayload | null> {
+  const [profile, rows] = await Promise.all([getProfile(), readStudyCards()]);
+  if (!profile) return null;
+  const now = new Date();
+  const logs = await readLogsInRange(new Date(now.getTime() - 86_400_000).toISOString(), new Date(now.getTime() + 15 * 86_400_000).toISOString());
+  const data = buildScheduleData({ month: localMonth(now, profile.timezone), cards: enrichCards(rows, [], now), logs, now, timezone: profile.timezone });
+  const start = Math.max(0, data.days.findIndex((day) => day.dateKey === data.todayKey));
+  return { todayKey: data.todayKey, days: data.days.slice(start, start + 14) };
+}
+
 export async function getScheduleData(month: string) {
-  const snapshot = await cardSnapshot();
-  if (!snapshot) return null;
+  const [profile, rows] = await Promise.all([getProfile(), readStudyCards()]);
+  if (!profile) return null;
   const [year, calendarMonth] = month.split("-").map(Number);
   if (!Number.isInteger(year) || !Number.isInteger(calendarMonth) || calendarMonth < 1 || calendarMonth > 12) throw new Error("Invalid schedule month.");
   const first = new Date(Date.UTC(year, calendarMonth - 1, 1));
   const gridStart = new Date(first);
   gridStart.setUTCDate(gridStart.getUTCDate() - ((gridStart.getUTCDay() + 6) % 7));
-  // Expand both edges by one day so a profile-local day is never truncated by UTC.
-  const logStart = new Date(gridStart.getTime() - 86_400_000);
-  const logEnd = new Date(gridStart.getTime() + 43 * 86_400_000);
-  const logs = await readLogsInRange(logStart.toISOString(), logEnd.toISOString());
-  return buildScheduleData({ month, cards: snapshot.cards, logs, now: snapshot.now, timezone: snapshot.profile.timezone });
+  const logs = await readLogsInRange(new Date(gridStart.getTime() - 86_400_000).toISOString(), new Date(gridStart.getTime() + 43 * 86_400_000).toISOString());
+  const now = new Date();
+  return buildScheduleData({ month, cards: enrichCards(rows, [], now), logs, now, timezone: profile.timezone });
 }
 
-export async function getProblemDetail(problemId: string) {
+export async function getProblemDetail(problemId: string, before?: string) {
   if (!z.string().uuid().safeParse(problemId).success) return null;
   const supabase = await createClient();
-  const [problemResult, snapshot, logs] = await Promise.all([
-    supabase.from("problems").select("id,source_id,leetcode_number,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(position,is_primary,topics(name))").eq("id", problemId).maybeSingle(),
-    cardSnapshot(),
-    readLogsForProblem(problemId),
+  const [profile, problemResult, cardResult, logs] = await Promise.all([
+    getProfile(),
+    measure("problem.read", () => supabase.from("problems").select("id,source_id,leetcode_number,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(position,is_primary,topics(name))").eq("id", problemId).maybeSingle()),
+    measure("card.one", () => supabase.from("user_problem_cards").select("due_at,stability,difficulty,elapsed_days,scheduled_days,learning_steps,reps,lapses,state,last_review_at,last_rating,version,first_attempted_at").eq("problem_id", problemId).maybeSingle()),
+    readLogsForProblem(problemId, before),
   ]);
-  if (problemResult.error) throw problemResult.error;
-  if (!problemResult.data || !snapshot) return null;
-  const card = enrichCards(snapshot.rows, logs, snapshot.now).find((item) => item.id === problemId) ?? null;
-  return {
-    profile: snapshot.profile,
-    problem: toProblem(problemResult.data),
-    card,
-    logs,
-  };
+  if (problemResult.error || cardResult.error) throw problemResult.error ?? cardResult.error;
+  if (!problemResult.data || !profile) return null;
+  const now = new Date();
+  const card = cardResult.data ? (() => {
+    const state = toCardState(cardResult.data);
+    const latest = logs[0];
+    return { ...toProblem(problemResult.data), card: state, retrievability: retrievability(state, now), latest_rating: (latest?.rating as ReviewRating | undefined) ?? (cardResult.data.last_rating as ReviewRating | undefined) ?? null, latest_note: latest?.note ?? null, latest_reviewed_at: latest?.reviewed_at ?? cardResult.data.last_review_at ?? null } satisfies StudyCard;
+  })() : null;
+  return { profile, problem: toProblem(problemResult.data), card, logs, nextCursor: logs.at(-1)?.reviewed_at ?? null };
 }
 
-export async function getPatternsData() {
-  const snapshot = await studySnapshot();
-  if (!snapshot) return null;
-  return { ...snapshot, patterns: patternSignals(snapshot.cards, snapshot.now, snapshot.profile.timezone), stats: progressSummary(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now) };
-}
-
-export async function getProgressData() {
-  const snapshot = await studySnapshot();
-  if (!snapshot) return null;
+export async function getProgressData(): Promise<ProgressPayload | null> {
+  const now = new Date();
+  const [profile, rows, logs] = await Promise.all([getProfile(), readStudyCards(), readAnalyticsLogs(new Date(now.getTime() - 91 * 86_400_000).toISOString())]);
+  if (!profile) return null;
+  const cards = enrichCards(rows, [], now);
   return {
-    ...snapshot,
-    stats: progressSummary(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now),
-    attention: attentionProblems(snapshot.cards, snapshot.now, snapshot.profile.timezone),
-    patterns: patternSignals(snapshot.cards, snapshot.now, snapshot.profile.timezone),
-    activity: activityForDays(snapshot.logs, snapshot.profile.timezone, snapshot.now, 28),
-    reviewLoad: reviewLoadForCards(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now),
+    timezone: profile.timezone,
+    hasCards: cards.length > 0,
+    stats: progressSummary(cards, logs, profile.timezone, now),
+    attention: attentionProblems(cards, now, profile.timezone).slice(0, 8).map((card) => ({
+      id: card.id,
+      leetcodeNumber: card.leetcodeNumber,
+      title: card.title,
+      topics: card.topics,
+      primaryTopic: card.primaryTopic,
+      reason: attentionReason(card, now, profile.timezone),
+      scheduledDays: card.card.scheduled_days,
+      dueAt: card.card.due_at,
+    })),
+    patterns: patternSignals(cards, now, profile.timezone),
+    activity: activityForDays(logs, profile.timezone, now, 28),
+    reviewLoad: reviewLoadForCards(cards, logs, profile.timezone, now),
   };
 }
 
 export async function getReviewHistory() {
-  return readRecentLogs();
+  return readAnalyticsLogs(new Date(Date.now() - 90 * 86_400_000).toISOString());
+}
+
+export async function getCatalogSearchIndex(catalogId: CatalogId) {
+  const rows = await catalogRows(catalogId);
+  const items = new Map<string, { type: "problem" | "pattern"; title: string; subtitle: string; href: string }>();
+  for (const row of rows as any[]) {
+    const problem = Array.isArray(row.problems) ? row.problems[0] : row.problems;
+    if (!problem?.id) continue;
+    items.set(`problem:${problem.id}`, { type: "problem", title: `#${problem.leetcode_number ?? leetcodeNumberFromSourceId(problem.source_id)} ${problem.title}`, subtitle: problem.difficulty, href: `/problems/${problem.id}` });
+    for (const topic of topicsFrom(problem.problem_topics)) items.set(`pattern:${topic}`, { type: "pattern", title: topic, subtitle: "Filter problem deck", href: `/problems?topic=${encodeURIComponent(topic)}` });
+  }
+  return [...items.values()];
 }
 
 export async function getAdminData() {
@@ -270,8 +308,8 @@ export async function getAdminData() {
   if (!profile || profile.role !== "admin" || !profile.is_active) return { invites: [], snapshots: [] };
   const supabase = createAdminClient();
   const [invites, snapshots] = await Promise.all([
-    supabase.from("allowed_emails").select("email,invited_at,claimed_at,is_active").order("invited_at", { ascending: false }),
-    supabase.from("catalog_snapshots").select("version,imported_at,problem_count,source_url").order("imported_at", { ascending: false }).limit(6),
+    measure("admin.invites", () => supabase.from("allowed_emails").select("email,invited_at,claimed_at,is_active").order("invited_at", { ascending: false })),
+    measure("admin.snapshots", () => supabase.from("catalog_snapshots").select("version,imported_at,problem_count,source_url").order("imported_at", { ascending: false }).limit(6)),
   ]);
   return { invites: invites.data ?? [], snapshots: snapshots.data ?? [] };
 }

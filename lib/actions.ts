@@ -9,7 +9,7 @@ import { createAdminClient, createClient } from "@/lib/supabase/server";
 import { CATALOG_IDS, REVIEW_RATINGS, type CompleteUserProblemCard, type FsrsCardState, type ReviewEventKind, type SubmitReviewInput } from "@/lib/types";
 import { safeErrorMessage, safeNoteSchema, timezoneSchema } from "@/lib/security";
 import { isDueOnOrBeforeLocalDay } from "@/lib/study-plan";
-import { leetcodeNumberFromSourceId } from "@/lib/utils";
+import { getCatalogSearchIndex } from "@/lib/queries";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
 export type ReviewActionResult = {
@@ -54,7 +54,9 @@ export async function setActiveCatalog(selectedCatalog: string): Promise<ActionR
     const profile = await activeProfile();
     const { error } = await saveProfileSettings(profile, { displayName: profile.display_name ?? "RecallCode user", timezone: profile.timezone, selectedCatalog: catalog.data }, Boolean(profile.display_name));
     if (error) return { ok: false, error: safeErrorMessage(error, "We could not change the catalog.") };
-    revalidatePath("/problems"); revalidatePath("/today"); revalidatePath("/schedule");
+    // Changing the browsing catalog does not change an existing card or its FSRS schedule.
+    // Refresh the deck only; the shell updates its selected-catalog state immediately.
+    revalidatePath("/problems");
     return { ok: true };
   } catch (error) { return { ok: false, error: safeErrorMessage(error, "We could not change the catalog.") }; }
 }
@@ -106,7 +108,9 @@ export async function submitReview(input: SubmitReviewInput): Promise<ReviewActi
       const conflict = error.code === "40001";
       return { ok: false, conflict, error: safeErrorMessage(error, conflict ? "This problem changed in another tab. Reload it, then rate again." : "We could not save this review. Please try again.") };
     }
-    revalidatePath("/today"); revalidatePath("/review"); revalidatePath("/schedule"); revalidatePath("/progress"); revalidatePath("/problems/" + parsed.data.problemId);
+    // The active review session reconciles from this response, so do not invalidate its
+    // route (which would cause a needless second queue fetch).
+    revalidatePath("/today"); revalidatePath("/schedule"); revalidatePath("/progress"); revalidatePath("/problems/" + parsed.data.problemId);
     return { ok: true, reviewLogId, eventKind, nextDue: next.due_at, reviewedAt: now.toISOString(), previousIntervalDays: row?.scheduled_days ?? 0, newIntervalDays: next.scheduled_days, note: parsed.data.note?.trim() || null, card: { problemId: parsed.data.problemId, ...dbCard({ ...next, due_at: next.due_at }), dueAt: next.due_at, version, firstAttemptedAt, latestRating: parsed.data.rating } };
   } catch (error) { return { ok: false, error: safeErrorMessage(error, "We could not save this review. Please try again.") }; }
 }
@@ -120,7 +124,7 @@ export async function undoReview(input: { reviewLogId: string; expectedVersion: 
     if (error) return { ok: false, error: safeErrorMessage(error, "This review can no longer be undone.") };
     const problemId = data?.problem_id as string;
     const previous = data?.previous_card_state as Record<string, any> | null;
-    revalidatePath("/today"); revalidatePath("/review"); revalidatePath("/schedule"); revalidatePath("/progress"); revalidatePath("/problems/" + problemId);
+    revalidatePath("/today"); revalidatePath("/schedule"); revalidatePath("/progress"); revalidatePath("/problems/" + problemId);
     return { ok: true, message: "Review undone.", problemId, card: previous ? cardResult(problemId, previous) : null };
   } catch (error) { return { ok: false, error: safeErrorMessage(error, "This review can no longer be undone.") }; }
 }
@@ -138,17 +142,8 @@ export async function saveSettings(input: { displayName: string; timezone: strin
 }
 
 export async function getSearchIndex(): Promise<Array<{ type: "problem" | "pattern"; title: string; subtitle: string; href: string }>> {
-  const profile = await activeProfile(); const supabase = await createClient();
-  const { data, error } = await supabase.from("catalog_problems").select("problems(id,source_id,title,difficulty,problem_topics(topics(name)))").eq("catalog_slug", profile.selected_catalog).order("sort_order");
-  if (error) return [];
-  const items = new Map<string, { type: "problem" | "pattern"; title: string; subtitle: string; href: string }>();
-  for (const row of data ?? []) {
-    const problem = Array.isArray((row as any).problems) ? (row as any).problems[0] : (row as any).problems;
-    if (!problem?.id) continue;
-    items.set("problem:" + problem.id, { type: "problem", title: "#" + leetcodeNumberFromSourceId(problem.source_id) + " " + problem.title, subtitle: problem.difficulty, href: "/problems/" + problem.id });
-    for (const relation of problem.problem_topics ?? []) { const topic = Array.isArray(relation.topics) ? relation.topics[0] : relation.topics; if (topic?.name) items.set("pattern:" + topic.name, { type: "pattern", title: topic.name, subtitle: "Filter problem deck", href: "/problems?topic=" + encodeURIComponent(topic.name) }); }
-  }
-  return [...items.values()];
+  const profile = await activeProfile();
+  return getCatalogSearchIndex(profile.selected_catalog);
 }
 
 export async function inviteUser(email: string): Promise<ActionResult> {

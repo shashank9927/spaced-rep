@@ -248,3 +248,8 @@ html[data-theme="dark"] .text-primary { color:var(--blue); }
 .review-load-bar.today { background:var(--primary); }
 .review-load-bar:hover,.review-load-bar:focus-visible { filter:brightness(1.12); }
 @media (prefers-reduced-motion: reduce) { .review-load-bar { transition:none; } }
+
+@keyframes chart-rise {
+  from { opacity: .45; transform: scaleY(.14); }
+  to { opacity: 1; transform: scaleY(1); }
+}
