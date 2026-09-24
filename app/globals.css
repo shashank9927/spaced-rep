@@ -238,3 +238,12 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 }
 .primary-button:hover { background:var(--primary-hover); }
 html[data-theme="dark"] .text-primary { color:var(--blue); }
+
+/* Small, dependency-free review workload chart. The horizontal overflow keeps
+   date labels readable on narrow phones instead of squeezing the bars. */
+.review-load-bars { min-height: 190px; display:flex; align-items:flex-end; gap:10px; }
+.review-load-column { min-width:42px; flex:1; display:flex; min-height:176px; flex-direction:column; align-items:center; justify-content:flex-end; }
+.review-load-bar { width:100%; min-height:2px; border-radius:5px 5px 2px 2px; background:var(--info); box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 24%,transparent); transition:height .18s ease,filter .18s ease; }
+.review-load-bar.today { background:var(--primary); }
+.review-load-bar:hover,.review-load-bar:focus-visible { filter:brightness(1.12); }
+@media (prefers-reduced-motion: reduce) { .review-load-bar { transition:none; } }

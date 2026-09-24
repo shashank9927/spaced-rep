@@ -2,7 +2,7 @@ import "server-only";
 
 import { cache } from "react";
 import { z } from "zod";
-import { activityForDays, patternStats, queueOrder, reviewStats, type StudyCard } from "@/lib/analytics";
+import { activityForDays, patternStats, queueOrder, reviewLoadForCards, reviewStats, type StudyCard } from "@/lib/analytics";
 import { getProfile, type Profile } from "@/lib/auth";
 import { buildScheduleData, isDueOnOrBeforeLocalDay } from "@/lib/study-plan";
 import { retrievability } from "@/lib/scheduler";
@@ -246,7 +246,8 @@ export async function getProgressData() {
     ...snapshot,
     stats: reviewStats(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now),
     patterns: patternStats(snapshot.cards),
-    activity: activityForDays(snapshot.logs, snapshot.profile.timezone, snapshot.now),
+    activity: activityForDays(snapshot.logs, snapshot.profile.timezone, snapshot.now, 28),
+    reviewLoad: reviewLoadForCards(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now),
   };
 }
 

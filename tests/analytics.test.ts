@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isStrong, isWeak, queueOrder } from "@/lib/analytics";
+import { isStrong, isWeak, queueOrder, reviewLoadForCards } from "@/lib/analytics";
 import type { StudyCard } from "@/lib/analytics";
 
 function card(overrides: Partial<StudyCard> = {}): StudyCard {
@@ -22,5 +22,36 @@ describe("study analytics", () => {
     const weakest = card({ retrievability: .48 });
     const stronger = card({ retrievability: .72, card: { ...card().card, lapses: 9 } });
     expect([stronger, weakest].sort(queueOrder)[0].retrievability).toBe(.48);
+  });
+
+  it("keeps overdue cards separate and finds the busiest upcoming day", () => {
+    const now = new Date("2026-09-24T10:00:00.000Z");
+    const overdue = card({ id: "00000000-0000-4000-8000-000000000001", card: { ...card().card, due_at: "2026-09-23T10:00:00.000Z" } });
+    const dueToday = card({ id: "00000000-0000-4000-8000-000000000002", card: { ...card().card, due_at: "2026-09-24T10:00:00.000Z" } });
+    const dueTomorrow = card({ id: "00000000-0000-4000-8000-000000000003", card: { ...card().card, due_at: "2026-09-25T10:00:00.000Z" } });
+    const load = reviewLoadForCards([overdue, dueToday, dueTomorrow], [], "Europe/Berlin", now);
+
+    expect(load.overdueCount).toBe(1);
+    expect(load.totalDueNext14Days).toBe(2);
+    expect(load.days[0]).toMatchObject({ dateKey: "2026-09-24", dueCount: 1, isToday: true });
+    expect(load.days[1]).toMatchObject({ dateKey: "2026-09-25", dueCount: 1 });
+    expect(load.peakDay?.dateKey).toBe("2026-09-24");
+  });
+
+  it("groups completed activity and due dates by the user's timezone", () => {
+    const dueNextLocalDay = card({ card: { ...card().card, due_at: "2026-09-25T07:30:00.000Z" } });
+    const log = { id: "log-1", problem_id: dueNextLocalDay.id, rating: "good" as const, reviewed_at: "2026-09-24T23:30:00.000Z", note: null, previous_due_at: null, next_due_at: "2026-09-28T12:00:00.000Z", scheduled_days: 4 };
+    const load = reviewLoadForCards([dueNextLocalDay], [log], "America/Los_Angeles", new Date("2026-09-24T23:00:00.000Z"));
+
+    expect(load.days[0]).toMatchObject({ dateKey: "2026-09-24", dueCount: 0, completedCount: 1 });
+    expect(load.days[1]).toMatchObject({ dateKey: "2026-09-25", dueCount: 1 });
+  });
+
+  it("returns an empty fourteen-day window without inventing workload", () => {
+    const load = reviewLoadForCards([], [], "UTC", new Date("2026-09-24T10:00:00.000Z"));
+    expect(load.days).toHaveLength(14);
+    expect(load.overdueCount).toBe(0);
+    expect(load.totalDueNext14Days).toBe(0);
+    expect(load.peakDay).toBeNull();
   });
 });

@@ -93,6 +93,21 @@ export interface ScheduleDay {
   items: ScheduleItem[];
 }
 
+export interface ReviewLoadDay {
+  dateKey: string;
+  label: string;
+  dueCount: number;
+  completedCount: number;
+  isToday: boolean;
+}
+
+export interface ReviewLoadPayload {
+  overdueCount: number;
+  totalDueNext14Days: number;
+  peakDay: ReviewLoadDay | null;
+  days: ReviewLoadDay[];
+}
+
 export interface SubmitReviewInput {
   problemId: string;
   rating: ReviewRating;
