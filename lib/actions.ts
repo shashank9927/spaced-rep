@@ -244,7 +244,7 @@ export async function getSearchIndex(): Promise<Array<{ type: "problem" | "patte
     items.set(`problem:${problem.id}`, { type: "problem", title: `#${leetcodeNumberFromSourceId(problem.source_id)} ${problem.title}`, subtitle: problem.difficulty, href: `/problems/${problem.id}` });
     for (const relation of problem.problem_topics ?? []) {
       const topic = Array.isArray(relation.topics) ? relation.topics[0] : relation.topics;
-      if (topic?.name) items.set(`pattern:${topic.name}`, { type: "pattern", title: topic.name, subtitle: "Pattern insight", href: "/insights" });
+      if (topic?.name) items.set(`pattern:${topic.name}`, { type: "pattern", title: topic.name, subtitle: "Filter problem deck", href: `/problems?topic=${encodeURIComponent(topic.name)}` });
     }
   }
   return [...items.values()];
