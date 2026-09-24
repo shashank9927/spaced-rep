@@ -141,6 +141,26 @@ export async function saveSettings(input: { displayName: string; timezone: strin
   } catch (error) { return { ok: false, error: safeErrorMessage(error, "We could not save settings.") }; }
 }
 
+const resetStudyProgressSchema = z.object({ confirmation: z.literal("RESET") });
+
+/** Permanently removes only the active member's cards, logs, notes, and reversals. */
+export async function resetStudyProgress(input: { confirmation: string }): Promise<ActionResult> {
+  const parsed = resetStudyProgressSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Type RESET exactly to confirm." };
+  try {
+    const profile = await activeProfile();
+    const { error } = await createAdminClient().rpc("reset_study_progress_service", { p_user_id: profile.id });
+    if (error) return { ok: false, error: safeErrorMessage(error, "We could not reset your study progress. Please try again.") };
+    revalidatePath("/today");
+    revalidatePath("/review");
+    revalidatePath("/schedule");
+    revalidatePath("/progress");
+    revalidatePath("/problems");
+    revalidatePath("/problems/[problemId]", "page");
+    return { ok: true, message: "Study progress reset. Your account and catalog were kept." };
+  } catch (error) { return { ok: false, error: safeErrorMessage(error, "We could not reset your study progress. Please try again.") }; }
+}
+
 export async function getSearchIndex(): Promise<Array<{ type: "problem" | "pattern"; title: string; subtitle: string; href: string }>> {
   const profile = await activeProfile();
   return getCatalogSearchIndex(profile.selected_catalog);
