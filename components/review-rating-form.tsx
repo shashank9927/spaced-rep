@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { ChevronDown, LoaderCircle, NotebookPen } from "lucide-react";
 import { submitReview, type ReviewActionResult } from "@/lib/actions";
 import type { RatingOption } from "@/lib/types";
@@ -13,12 +13,16 @@ export function ReviewRatingForm({ problemId, options, onComplete }: { problemId
   const [note, setNote] = useState("");
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
+  const requestIdRef = useRef<string | null>(null);
 
   const submit = useCallback((rating: RatingOption["rating"]) => {
     setMessage(null);
+    const requestId = requestIdRef.current ?? crypto.randomUUID();
+    requestIdRef.current = requestId;
     startTransition(async () => {
-      const result = await submitReview({ problemId, rating, note: note || undefined, requestId: crypto.randomUUID() });
+      const result = await submitReview({ problemId, rating, note: note || undefined, requestId });
       if (!result.ok) { setMessage(result.error); return; }
+      requestIdRef.current = null;
       setNote("");
       onComplete?.(result);
     });

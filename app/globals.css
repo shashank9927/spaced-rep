@@ -149,3 +149,10 @@ html[data-theme="dark"] .daily-section,html[data-theme="dark"] .upcoming-preview
 
 .desktop-header { min-height:64px; padding:0 clamp(24px,4vw,52px); display:flex; align-items:center; border-bottom:1px solid var(--line); background:color-mix(in srgb,var(--canvas) 88%,var(--panel)); }.desktop-search-trigger { width:min(430px,48vw); min-height:40px; padding:0 11px; display:flex; align-items:center; gap:9px; color:var(--muted); border:1px solid var(--line); border-radius:9px; background:var(--panel); text-align:left; }.desktop-search-trigger:hover { color:var(--ink-soft); border-color:color-mix(in srgb,var(--blue) 40%,var(--line)); }.desktop-search-trigger span { flex:1; font-size:.8rem; }.desktop-search-trigger kbd { padding:3px 6px; border-radius:5px; background:var(--soft); color:var(--muted); font-size:.64rem; }
 @media (max-width:780px) { .desktop-header { display:none; } }
+
+/* Calendar modifiers are deliberately subtle: a date can carry more than one
+   workload signal, while the selected state must remain the clearest cue. */
+.rc-calendar .rdp-day_review:not(.rdp-selected) button { box-shadow:inset 0 -2px 0 #f2b35c; }
+.rc-calendar .rdp-day_new:not(.rdp-selected) button { box-shadow:inset 0 -2px 0 var(--primary); }
+.rc-calendar .rdp-day_completed:not(.rdp-selected) button { color:var(--green); }
+@media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto !important; animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; } }

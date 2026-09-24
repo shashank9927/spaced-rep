@@ -12,7 +12,7 @@ function catalog(id: string, difficulty: CatalogProblem["difficulty"], sort_orde
 function active(id: string, difficulty: StudyCard["difficulty"], firstSolvedAt = "2026-09-21T08:00:00.000Z"): StudyCard {
   return {
     id, source_id: id, leetcodeNumber: 1, slug: id, title: id, difficulty, leetcode_url: null, neetcode_url: null, topics: [], retrievability: .8, latest_rating: "good", latest_note: null, latest_reviewed_at: firstSolvedAt,
-    card: { due: "2026-09-22T08:00:00.000Z", due_at: "2026-09-22T08:00:00.000Z", stability: 3, difficulty: 5, elapsed_days: 0, scheduled_days: 1, learning_steps: 0, reps: 1, lapses: 0, state: 1, last_review: firstSolvedAt, version: 1, first_solved_at: firstSolvedAt },
+    card: { due: "2026-09-22T08:00:00.000Z", due_at: "2026-09-22T08:00:00.000Z", stability: 3, difficulty: 5, elapsed_days: 0, scheduled_days: 1, learning_steps: 0, reps: 1, lapses: 0, state: 1, last_review: firstSolvedAt, version: 1, first_attempted_at: firstSolvedAt },
   };
 }
 

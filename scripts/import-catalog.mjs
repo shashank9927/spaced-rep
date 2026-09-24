@@ -33,7 +33,7 @@ if (memberships("neetcode250").length !== 250) throw new Error("Catalog snapshot
 
 console.log(`Connecting to ${new URL(url).host}…`);
 await assert("Saving the catalog snapshot", supabase.from("catalog_snapshots").upsert({ version: snapshot.version, source: snapshot.source, source_url: snapshot.sourceUrl, problem_count: snapshot.problems.length }, { onConflict: "version" }));
-const payload = snapshot.problems.map((problem) => ({ source_id: problem.sourceId, slug: problem.slug, title: problem.title, difficulty: problem.difficulty, leetcode_url: problem.leetcodeUrl, neetcode_url: problem.neetcodeUrl, metadata_version: snapshot.version, is_active: true }));
+const payload = snapshot.problems.map((problem, index) => ({ source_id: problem.sourceId, leetcode_number: leetcodeNumbers[index], slug: problem.slug, title: problem.title, difficulty: problem.difficulty, leetcode_url: problem.leetcodeUrl, neetcode_url: problem.neetcodeUrl, metadata_version: snapshot.version, is_active: true }));
 for (const [index, chunk] of chunks(payload).entries()) await assert(`Importing problem batch ${index + 1}`, supabase.from("problems").upsert(chunk, { onConflict: "source_id" }));
 const problemRows = [];
 for (let from = 0; ; from += 500) {
@@ -52,7 +52,7 @@ if (topicNames.length) {
   await assert("Importing topics", supabase.from("topics").upsert(topicNames.map((name) => ({ name })), { onConflict: "name" }));
   const topicRows = await assert("Reading imported topics", supabase.from("topics").select("id,name").in("name", topicNames));
   const topicId = new Map(topicRows.map((row) => [row.name, row.id]));
-  const links = snapshot.problems.flatMap((problem) => problem.topics.map((topic) => ({ problem_id: problemId.get(problem.sourceId), topic_id: topicId.get(topic) }))).filter((link) => link.problem_id && link.topic_id);
+  const links = snapshot.problems.flatMap((problem) => problem.topics.map((topic, position) => ({ problem_id: problemId.get(problem.sourceId), topic_id: topicId.get(topic), position, is_primary: position === 0 }))).filter((link) => link.problem_id && link.topic_id);
   for (const [index, chunk] of chunks(links).entries()) await assert(`Linking problem topics batch ${index + 1}`, supabase.from("problem_topics").upsert(chunk, { onConflict: "problem_id,topic_id" }));
 }
 

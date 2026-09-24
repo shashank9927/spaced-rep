@@ -15,7 +15,7 @@ export async function GET(request: Request) {
       await supabase.auth.signOut();
       return NextResponse.redirect(new URL("/denied", url.origin));
     }
-    return NextResponse.redirect(new URL(claim.needsOnboarding ? "/onboarding" : "/dashboard", url.origin));
+    return NextResponse.redirect(new URL(claim.needsOnboarding ? "/onboarding" : "/today", url.origin));
   } catch {
     return NextResponse.redirect(new URL("/login?message=We+could+not+verify+your+invite.+Check+the+app+setup+and+try+again.", url.origin));
   }

@@ -7,7 +7,7 @@ import { getProfile, type Profile } from "@/lib/auth";
 import { cardStateForDatabase, retrievability, scheduleCard } from "@/lib/scheduler";
 import { createClient } from "@/lib/supabase/server";
 import { leetcodeNumberFromSourceId } from "@/lib/utils";
-import { CATALOG_IDS, PATTERN_RECALLS, REVIEW_RATINGS, STUDY_WEEKDAYS, type FsrsCardState, type ReviewRating, type StudyPlanPreferences, type SubmitReviewInput } from "@/lib/types";
+import { CATALOG_IDS, REVIEW_RATINGS, STUDY_WEEKDAYS, type FsrsCardState, type ReviewRating, type StudyPlanPreferences, type SubmitReviewInput } from "@/lib/types";
 
 export type ActionResult = { ok: true; message?: string; nextDue?: string } | { ok: false; error: string };
 export type ReviewActionResult = {
@@ -17,7 +17,7 @@ export type ReviewActionResult = {
   newIntervalDays: number;
   previousRetrievability: number | null;
   newRetrievability: number;
-  updatedCard: { problemId: string; dueAt: string; stability: number; lapses: number; repetitions: number; scheduledDays: number; firstSolvedAt: string };
+  updatedCard: { problemId: string; dueAt: string; stability: number; lapses: number; repetitions: number; scheduledDays: number; firstAttemptedAt: string };
 } | { ok: false; error: string };
 
 const studyPlanSchema = z.object({
@@ -63,9 +63,10 @@ export async function saveOnboarding(input: { displayName: string; timezone: str
     new_hard_per_day: parsed.data.studyPlan.hardPerDay,
     study_days: parsed.data.studyPlan.studyDays,
     study_plan_configured_at: new Date().toISOString(),
+    onboarding_completed_at: new Date().toISOString(),
   }).eq("id", profile.id);
   if (error) return { ok: false, error: error.message };
-  revalidatePath("/dashboard");
+  revalidatePath("/today");
   return { ok: true };
 }
 
@@ -78,7 +79,7 @@ export async function setActiveCatalog(selectedCatalog: string): Promise<ActionR
   if (error) return { ok: false, error: error.message };
   revalidatePath("/catalog");
   revalidatePath("/problems");
-  revalidatePath("/dashboard");
+  revalidatePath("/today");
   revalidatePath("/schedule");
   return { ok: true };
 }
@@ -87,8 +88,6 @@ const reviewSchema = z.object({
   problemId: z.string().uuid(),
   rating: z.enum(REVIEW_RATINGS),
   note: z.string().trim().max(2000).optional().default(""),
-  durationMinutes: z.number().int().min(1).max(300).optional(),
-  patternRecall: z.enum(PATTERN_RECALLS).optional(),
   requestId: z.string().uuid(),
 });
 
@@ -112,6 +111,26 @@ export async function submitReview(input: SubmitReviewInput): Promise<ReviewActi
   if (!parsed.success) return { ok: false, error: "The review data is invalid. Refresh and try again." };
   const profile = await activeProfile();
   const supabase = await createClient();
+  const { data: existingLog, error: existingLogError } = await supabase
+    .from("review_logs")
+    .select("next_due_at,scheduled_days")
+    .eq("user_id", profile.id)
+    .eq("request_id", parsed.data.requestId)
+    .maybeSingle();
+  if (existingLogError) return { ok: false, error: existingLogError.message };
+  if (existingLog) {
+    const { data: existingCard, error: existingCardError } = await supabase.from("user_problem_cards").select("*").eq("user_id", profile.id).eq("problem_id", parsed.data.problemId).maybeSingle();
+    if (existingCardError || !existingCard) return { ok: false, error: existingCardError?.message ?? "Your saved review could not be reconciled. Refresh and try again." };
+    return {
+      ok: true,
+      nextDue: existingLog.next_due_at,
+      previousIntervalDays: 0,
+      newIntervalDays: existingLog.scheduled_days,
+      previousRetrievability: null,
+      newRetrievability: retrievability(dbCard(existingCard), new Date()),
+      updatedCard: { problemId: parsed.data.problemId, dueAt: existingLog.next_due_at, stability: Number(existingCard.stability), lapses: existingCard.lapses, repetitions: existingCard.reps, scheduledDays: existingLog.scheduled_days, firstAttemptedAt: existingCard.first_attempted_at },
+    };
+  }
   const { data: row, error: cardError } = await supabase
     .from("user_problem_cards")
     .select("*")
@@ -143,8 +162,6 @@ export async function submitReview(input: SubmitReviewInput): Promise<ReviewActi
     p_rating: parsed.data.rating,
     p_reviewed_at: now.toISOString(),
     p_note: parsed.data.note,
-    p_duration_minutes: parsed.data.durationMinutes ?? null,
-    p_pattern_recall: parsed.data.patternRecall ?? null,
     p_scheduler_version: SCHEDULER_VERSION,
     p_previous_due_at: row?.due_at ?? null,
     p_next_due_at: next.due_at,
@@ -157,7 +174,7 @@ export async function submitReview(input: SubmitReviewInput): Promise<ReviewActi
     p_lapses: next.lapses,
     p_state: next.state,
     p_last_review_at: next.last_review_at,
-    p_first_solved_at: row?.first_solved_at ?? now.toISOString(),
+    p_first_attempted_at: row?.first_attempted_at ?? now.toISOString(),
     p_expected_version: row?.version ?? 0,
   });
   if (error) {
@@ -165,11 +182,11 @@ export async function submitReview(input: SubmitReviewInput): Promise<ReviewActi
     return { ok: false, error: isStale ? "This problem was updated in another tab. Refresh to continue." : error.message };
   }
 
-  revalidatePath("/dashboard");
+  revalidatePath("/today");
   revalidatePath("/problems");
   revalidatePath(`/problems/${parsed.data.problemId}`);
   revalidatePath("/schedule");
-  revalidatePath("/insights");
+  revalidatePath("/progress");
   return {
     ok: true,
     nextDue: next.due_at,
@@ -184,7 +201,7 @@ export async function submitReview(input: SubmitReviewInput): Promise<ReviewActi
       lapses: next.lapses,
       repetitions: next.reps,
       scheduledDays: next.scheduled_days,
-      firstSolvedAt: row?.first_solved_at ?? now.toISOString(),
+      firstAttemptedAt: row?.first_attempted_at ?? now.toISOString(),
     },
   };
 }
@@ -202,7 +219,7 @@ export async function saveStudyPlanPreferences(input: Omit<StudyPlanPreferences,
     study_plan_configured_at: new Date().toISOString(),
   }).eq("id", profile.id);
   if (error) return { ok: false, error: error.message };
-  revalidatePath("/dashboard");
+  revalidatePath("/today");
   revalidatePath("/schedule");
   revalidatePath("/settings");
   return { ok: true, message: "Study plan saved." };
@@ -223,7 +240,7 @@ export async function saveSettings(input: { displayName: string; timezone: strin
     selected_catalog: parsed.data.selectedCatalog,
   }).eq("id", profile.id);
   if (error) return { ok: false, error: error.message };
-  revalidatePath("/dashboard");
+  revalidatePath("/today");
   revalidatePath("/problems");
   revalidatePath("/settings");
   return { ok: true, message: "Settings saved." };

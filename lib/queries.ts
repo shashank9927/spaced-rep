@@ -7,8 +7,8 @@ import { createClient } from "@/lib/supabase/server";
 import { leetcodeNumberFromSourceId } from "@/lib/utils";
 import type { CatalogProblem, DueProblem, FsrsCardState, ProblemSummary, ReviewLogSummary, ReviewRating, StudyPlanPreferences } from "@/lib/types";
 
-const CARD_SELECT = "due_at,stability,difficulty,elapsed_days,scheduled_days,learning_steps,reps,lapses,state,last_review_at,version,first_solved_at,problems(id,source_id,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(topics(name)))";
-const LOG_SELECT = "id,problem_id,rating,reviewed_at,note,duration_minutes,pattern_recall,previous_due_at,next_due_at,scheduled_days,problems(title,difficulty,source_id)";
+const CARD_SELECT = "due_at,stability,difficulty,elapsed_days,scheduled_days,learning_steps,reps,lapses,state,last_review_at,last_rating,version,first_attempted_at,problems(id,source_id,leetcode_number,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(topics(name)))";
+const LOG_SELECT = "id,problem_id,rating,reviewed_at,note,previous_due_at,next_due_at,scheduled_days,problems(title,difficulty,source_id,leetcode_number)";
 
 function topicsFrom(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -22,7 +22,7 @@ function toProblem(value: any): ProblemSummary {
   return {
     id: value.id,
     source_id: value.source_id,
-    leetcodeNumber: leetcodeNumberFromSourceId(value.source_id),
+    leetcodeNumber: value.leetcode_number ?? leetcodeNumberFromSourceId(value.source_id),
     slug: value.slug,
     title: value.title,
     difficulty: value.difficulty,
@@ -32,7 +32,7 @@ function toProblem(value: any): ProblemSummary {
   };
 }
 
-function toCardState(row: any): FsrsCardState & { due_at: string; version: number; first_solved_at: string } {
+function toCardState(row: any): FsrsCardState & { due_at: string; version: number; first_attempted_at: string } {
   return {
     due: row.due_at,
     due_at: row.due_at,
@@ -46,7 +46,7 @@ function toCardState(row: any): FsrsCardState & { due_at: string; version: numbe
     state: row.state,
     last_review: row.last_review_at,
     version: row.version,
-    first_solved_at: row.first_solved_at,
+    first_attempted_at: row.first_attempted_at,
   };
 }
 
@@ -64,11 +64,13 @@ const readCards = cache(async () => {
   return data ?? [];
 });
 
-// A capped metric history keeps normal navigation small. Detail and calendar
-// views query their own narrow ranges below instead of inheriting this payload.
+// Analytics only needs a bounded look-back window. Detailed history has its own
+// per-problem query, so normal navigation never fetches a user's whole log.
 const readRecentLogs = cache(async (): Promise<ReviewLogSummary[]> => {
   const supabase = await createClient();
-  const { data, error } = await supabase.from("review_logs").select(LOG_SELECT).order("reviewed_at", { ascending: false }).limit(1200);
+  const since = new Date();
+  since.setUTCDate(since.getUTCDate() - 366);
+  const { data, error } = await supabase.from("review_logs").select(LOG_SELECT).gte("reviewed_at", since.toISOString()).order("reviewed_at", { ascending: false }).limit(800);
   if (error) throw error;
   return mapLogs(data ?? []);
 });
@@ -98,7 +100,7 @@ function enrichCards(rows: any[], logs: ReviewLogSummary[], now = new Date()): S
       ...toProblem(row.problems),
       card,
       retrievability: retrievability(card, now),
-      latest_rating: (latest?.rating as ReviewRating | undefined) ?? null,
+      latest_rating: (latest?.rating as ReviewRating | undefined) ?? (row.last_rating as ReviewRating | undefined) ?? null,
       latest_note: latest?.note ?? null,
       latest_reviewed_at: latest?.reviewed_at ?? null,
     } satisfies StudyCard];
@@ -124,7 +126,7 @@ const cardSnapshot = cache(async () => {
 const catalogRows = cache(async (catalogId: Profile["selected_catalog"]) => {
   const supabase = await createClient();
   const { data, error } = await supabase.from("catalog_problems")
-    .select("sort_order,problems(id,source_id,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(topics(name)))")
+    .select("sort_order,problems(id,source_id,leetcode_number,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(topics(name)))")
     .eq("catalog_slug", catalogId)
     .order("sort_order");
   if (error) throw error;
@@ -147,7 +149,7 @@ async function catalogProblemsForSnapshot(catalogId: Profile["selected_catalog"]
         stability: card.card.stability,
         lapses: card.card.lapses,
         scheduled_days: card.card.scheduled_days,
-        first_solved_at: card.card.first_solved_at,
+        first_attempted_at: card.card.first_attempted_at,
         retrievability: card.retrievability,
         latest_rating: card.latest_rating,
       } : null,
@@ -156,12 +158,12 @@ async function catalogProblemsForSnapshot(catalogId: Profile["selected_catalog"]
 }
 
 export async function getCatalogProblems(catalogId: Profile["selected_catalog"]): Promise<CatalogProblem[]> {
-  const snapshot = await studySnapshot();
+  const snapshot = await cardSnapshot();
   return catalogProblemsForSnapshot(catalogId, snapshot?.cards ?? []);
 }
 
 export async function getDueQueue(): Promise<DueProblem[]> {
-  const snapshot = await studySnapshot();
+  const snapshot = await cardSnapshot();
   if (!snapshot) return [];
   return snapshot.cards.filter((card) => new Date(card.card.due_at).getTime() <= snapshot.now.getTime()).sort(queueOrder);
 }
@@ -189,7 +191,7 @@ export async function getTodayData() {
     ...snapshot,
     due,
     upcoming,
-    stats: reviewStats(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now),
+    stats: reviewStats(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now, snapshot.profile.study_days),
     todayPlan,
   };
 }
@@ -216,7 +218,7 @@ export async function getScheduleData(month: string) {
 export async function getProblemDetail(problemId: string) {
   const supabase = await createClient();
   const [problemResult, snapshot, logs] = await Promise.all([
-    supabase.from("problems").select("id,source_id,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(topics(name))").eq("id", problemId).maybeSingle(),
+    supabase.from("problems").select("id,source_id,leetcode_number,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(topics(name))").eq("id", problemId).maybeSingle(),
     cardSnapshot(),
     readLogsForProblem(problemId),
   ]);
@@ -234,7 +236,7 @@ export async function getProblemDetail(problemId: string) {
 export async function getPatternsData() {
   const snapshot = await studySnapshot();
   if (!snapshot) return null;
-  return { ...snapshot, patterns: patternStats(snapshot.cards), stats: reviewStats(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now) };
+  return { ...snapshot, patterns: patternStats(snapshot.cards), stats: reviewStats(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now, snapshot.profile.study_days) };
 }
 
 export async function getProgressData() {
@@ -242,7 +244,7 @@ export async function getProgressData() {
   if (!snapshot) return null;
   return {
     ...snapshot,
-    stats: reviewStats(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now),
+    stats: reviewStats(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now, snapshot.profile.study_days),
     patterns: patternStats(snapshot.cards),
     activity: activityForDays(snapshot.logs, snapshot.profile.timezone, snapshot.now),
   };

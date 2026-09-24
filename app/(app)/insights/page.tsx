@@ -3,7 +3,7 @@ import { ArrowRight, Flame, Sparkles } from "lucide-react";
 import { EmptyState } from "@/components/app-shell";
 import { getProgressData } from "@/lib/queries";
 
-export default async function InsightsPage() {
+export default async function ProgressPage() {
   const data = await getProgressData();
   if (!data) return null;
   const weak = data.stats.weak.slice(0, 8);

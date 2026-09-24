@@ -68,7 +68,7 @@ function addItem(days: Map<string, ScheduleDay>, item: ScheduleItem) {
 function completedToday(cards: StudyCard[], dateKey: string, timezone: string) {
   const counts: Record<ProblemDifficulty, number> = { Easy: 0, Medium: 0, Hard: 0 };
   for (const card of cards) {
-    if (localDateKey(new Date(card.card.first_solved_at), timezone) === dateKey) counts[card.difficulty] += 1;
+    if (localDateKey(new Date(card.card.first_attempted_at), timezone) === dateKey) counts[card.difficulty] += 1;
   }
   return counts;
 }

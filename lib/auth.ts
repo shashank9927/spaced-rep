@@ -31,7 +31,7 @@ export const getProfile = cache(async (): Promise<Profile | null> => {
 export async function requireProfile(options?: { onboarding?: boolean; admin?: boolean }): Promise<Profile> {
   const profile = await getProfile();
   if (!profile) redirect("/login");
-  if (options?.admin && profile.role !== "admin") redirect("/dashboard");
+  if (options?.admin && profile.role !== "admin") redirect("/today");
   if (!options?.onboarding && !profile.display_name) redirect("/onboarding");
   return profile;
 }

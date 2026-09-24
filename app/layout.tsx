@@ -11,5 +11,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable}`} suppressHydrationWarning><head><Script id="recallcode-theme-init" strategy="beforeInteractive">{`(function(){try{var t=localStorage.getItem("recallcode-theme");document.documentElement.dataset.theme=t==="dark"||t==="light"?t:"light"}catch(e){document.documentElement.dataset.theme="light"}})()`}</Script></head><body>{children}</body></html>;
+  return <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable}`} data-theme="dark" suppressHydrationWarning><head><Script id="recallcode-theme-init" strategy="beforeInteractive">{`(function(){try{var t=localStorage.getItem("recallcode-theme");document.documentElement.dataset.theme=t==="dark"||t==="light"?t:"dark"}catch(e){document.documentElement.dataset.theme="dark"}})()`}</Script></head><body>{children}</body></html>;
 }
