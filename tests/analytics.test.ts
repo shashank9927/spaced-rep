@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { currentStreak, isStrong, isWeak, queueOrder } from "@/lib/analytics";
+import { isStrong, isWeak, queueOrder } from "@/lib/analytics";
 import type { StudyCard } from "@/lib/analytics";
-import type { ReviewLogSummary } from "@/lib/types";
 
 function card(overrides: Partial<StudyCard> = {}): StudyCard {
   return {
@@ -13,13 +12,7 @@ function card(overrides: Partial<StudyCard> = {}): StudyCard {
   };
 }
 
-const log = (reviewed_at: string): ReviewLogSummary => ({ id: reviewed_at, problem_id: "id", rating: "good", reviewed_at, note: null, previous_due_at: null, next_due_at: reviewed_at, scheduled_days: 1 });
-
 describe("study analytics", () => {
-  it("keeps a streak alive through a day with no review yet", () => {
-    expect(currentStreak([log("2026-09-22T18:00:00.000Z"), log("2026-09-21T18:00:00.000Z")], "Europe/Berlin", new Date("2026-09-23T10:00:00.000Z"))).toBe(2);
-  });
-
   it("classifies strong and weak cards from FSRS data and latest rating", () => {
     expect(isStrong(card({ retrievability: .92, card: { ...card().card, stability: 31 } }))).toBe(true);
     expect(isWeak(card({ retrievability: .96, latest_rating: "hard" }))).toBe(true);

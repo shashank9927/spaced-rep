@@ -7,5 +7,5 @@ export default async function ProblemsPage({ searchParams }: { searchParams: Pro
   const problems = await getCatalogProblems(profile.selected_catalog);
   const initialStatus = params.status === "due" || params.status === "new" ? params.status : "all";
   const initialTopic = params.topic && problems.some((problem) => problem.topics.includes(params.topic!)) ? params.topic : "all";
-  return <CatalogClient key={`${profile.selected_catalog}-${initialStatus}-${initialTopic}`} initialStatus={initialStatus} initialTopic={initialTopic} problems={problems} />;
+  return <CatalogClient key={`${profile.selected_catalog}-${initialStatus}-${initialTopic}`} initialStatus={initialStatus} initialTopic={initialTopic} problems={problems} timezone={profile.timezone} />;
 }

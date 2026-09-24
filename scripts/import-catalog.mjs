@@ -60,7 +60,15 @@ const catalogs = [["neetcode150", "NeetCode 150", "The core interview-practice l
 for (const [slug, name, description] of catalogs) {
   await assert(`Saving ${slug}`, supabase.from("catalogs").upsert({ slug, name, description, snapshot_version: snapshot.version, updated_at: new Date().toISOString() }, { onConflict: "slug" }));
   await assert(`Clearing old ${slug} membership`, supabase.from("catalog_problems").delete().eq("catalog_slug", slug));
-  const catalogMemberships = memberships(slug).map((problem, sort_order) => ({ catalog_slug: slug, problem_id: problemId.get(problem.sourceId), sort_order })).filter((row) => row.problem_id);
+  const selected = memberships(slug);
+  const hasExplicitOrder = selected.every((problem) => Number.isInteger(problem.catalogOrder?.[slug]));
+  const ordered = [...selected].sort((a, b) => hasExplicitOrder
+    ? a.catalogOrder[slug] - b.catalogOrder[slug]
+    : a.sourceId.localeCompare(b.sourceId));
+  if (hasExplicitOrder && new Set(ordered.map((problem) => problem.catalogOrder[slug])).size !== ordered.length) {
+    throw new Error(`Catalog snapshot contains duplicate ${slug} order values.`);
+  }
+  const catalogMemberships = ordered.map((problem, sort_order) => ({ catalog_slug: slug, problem_id: problemId.get(problem.sourceId), sort_order })).filter((row) => row.problem_id);
   for (const [index, chunk] of chunks(catalogMemberships).entries()) await assert(`Importing ${slug} membership batch ${index + 1}`, supabase.from("catalog_problems").insert(chunk));
 }
 console.log(`Imported ${snapshot.problems.length} problems from ${snapshot.version}.`);

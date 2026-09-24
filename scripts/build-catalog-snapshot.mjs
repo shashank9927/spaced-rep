@@ -48,7 +48,7 @@ function parsePublicProblemObjects(bundle) {
 
 function canonicalize(entries) {
   const byId = new Map();
-  for (const entry of entries) {
+  for (const [index, entry] of entries.entries()) {
     const slug = String(entry.ncLink || entry.link || entry.code || entry.problem)
       .replace(/^\/+|\/+$/g, "")
       .replace(/\/question$/, "");
@@ -58,6 +58,10 @@ function canonicalize(entries) {
     if (entry.neetcode150) catalogs.add("neetcode150");
     if (entry.neetcode250) catalogs.add("neetcode250");
     catalogs.add("allNC");
+    const catalogOrder = { ...(existing?.catalogOrder ?? {}) };
+    if (entry.neetcode150 && catalogOrder.neetcode150 === undefined) catalogOrder.neetcode150 = index;
+    if (entry.neetcode250 && catalogOrder.neetcode250 === undefined) catalogOrder.neetcode250 = index;
+    if (catalogOrder.allNC === undefined) catalogOrder.allNC = index;
     byId.set(sourceId, {
       sourceId,
       slug,
@@ -67,9 +71,11 @@ function canonicalize(entries) {
       leetcodeUrl: entry.link ? `https://leetcode.com/problems/${String(entry.link).replace(/^\/+/, "")}` : null,
       neetcodeUrl: entry.ncLink ? `https://neetcode.io/problems/${String(entry.ncLink).replace(/^\/+/, "")}question` : null,
       catalogs: [...catalogs],
+      catalogOrder,
     });
   }
-  return [...byId.values()].sort((a, b) => a.sourceId.localeCompare(b.sourceId));
+  // The public bundle order is the official catalog order. Never sort by ID.
+  return [...byId.values()];
 }
 
 const page = await fetch(pageUrl).then(async (response) => {

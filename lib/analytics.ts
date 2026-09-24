@@ -1,4 +1,4 @@
-import type { DueProblem, ReviewLogSummary, ReviewRating, StudyWeekday } from "@/lib/types";
+import type { DueProblem, ReviewLogSummary, ReviewRating } from "@/lib/types";
 import { localDateKey } from "@/lib/utils";
 
 export type StudyCard = DueProblem & {
@@ -33,43 +33,6 @@ export function nextDateKey(key: string): string {
   return date.toISOString().slice(0, 10);
 }
 
-function weekdayForDate(dateKey: string): StudyWeekday {
-  return (["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as StudyWeekday[])[new Date(`${dateKey}T12:00:00.000Z`).getUTCDay()];
-}
-
-function priorStudyDay(dateKey: string, days: StudyWeekday[]) {
-  let cursor = previousDateKey(dateKey);
-  while (!days.includes(weekdayForDate(cursor))) cursor = previousDateKey(cursor);
-  return cursor;
-}
-
-export function currentStreak(logs: Pick<ReviewLogSummary, "reviewed_at">[], timezone: string, now = new Date(), studyDays: StudyWeekday[] = ["mon", "tue", "wed", "thu", "fri"]): number {
-  const reviewedDays = new Set(logs.map((log) => localDateKey(new Date(log.reviewed_at), timezone)));
-  let cursor = localDateKey(now, timezone);
-  // The current active day remains open until local midnight. Rest days never
-  // advance or break a planned-day streak.
-  if (!studyDays.includes(weekdayForDate(cursor)) || !reviewedDays.has(cursor)) cursor = priorStudyDay(cursor, studyDays);
-  let streak = 0;
-  while (reviewedDays.has(cursor) && studyDays.includes(weekdayForDate(cursor))) {
-    streak += 1;
-    cursor = priorStudyDay(cursor, studyDays);
-  }
-  return streak;
-}
-
-export function longestStreak(logs: Pick<ReviewLogSummary, "reviewed_at">[], timezone: string, studyDays: StudyWeekday[] = ["mon", "tue", "wed", "thu", "fri"]): number {
-  const days = Array.from(new Set(logs.map((log) => localDateKey(new Date(log.reviewed_at), timezone)))).sort();
-  let best = 0;
-  let running = 0;
-  let previous: string | null = null;
-  for (const day of days.filter((day) => studyDays.includes(weekdayForDate(day)))) {
-    running = previous && day === priorStudyDay(day, studyDays) ? running + 1 : 1;
-    best = Math.max(best, running);
-    previous = day;
-  }
-  return best;
-}
-
 export function weekStartKey(now: Date, timezone: string): string {
   const today = localDateKey(now, timezone);
   const date = new Date(`${today}T12:00:00.000Z`);
@@ -78,7 +41,7 @@ export function weekStartKey(now: Date, timezone: string): string {
   return date.toISOString().slice(0, 10);
 }
 
-export function reviewStats(cards: StudyCard[], logs: ReviewLogSummary[], timezone: string, now = new Date(), studyDays?: StudyWeekday[]) {
+export function reviewStats(cards: StudyCard[], logs: ReviewLogSummary[], timezone: string, now = new Date()) {
   const currentWeek = weekStartKey(now, timezone);
   const weekLogs = logs.filter((log) => localDateKey(new Date(log.reviewed_at), timezone) >= currentWeek);
   const successful = logs.filter((log) => log.rating === "good" || log.rating === "easy");
@@ -93,8 +56,6 @@ export function reviewStats(cards: StudyCard[], logs: ReviewLogSummary[], timezo
     averageRetrievability,
     recallSuccessRate: logs.length ? successful.length / logs.length : null,
     reviewsThisWeek: weekLogs.length,
-    currentStreak: currentStreak(logs, timezone, now, studyDays),
-    longestStreak: longestStreak(logs, timezone, studyDays),
     strong,
     weak,
   };

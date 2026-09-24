@@ -15,6 +15,10 @@ describe("FSRS review scheduling", () => {
     expect(first.next.due.getTime()).toBeGreaterThan(now.getTime());
   });
 
+  it("uses day-sized initial intervals for coding attempts", () => {
+    expect(ratingOptions(null, now).map((choice) => choice.intervalLabel)).toEqual(["1d", "2d", "3d", "8d"]);
+  });
+
   it("schedules a repeated review from the saved database card", () => {
     const first = scheduleCard(null, "good", now).next;
     const saved: FsrsCardState = {
@@ -26,6 +30,20 @@ describe("FSRS review scheduling", () => {
     const second = scheduleCard(saved, "easy", new Date(first.due));
     expect(second.next.reps).toBeGreaterThan(first.reps);
     expect(second.next.due.getTime()).toBeGreaterThan(new Date(first.due).getTime());
+  });
+
+  it("expands a later Good interval and reduces it after Forgot", () => {
+    const first = scheduleCard(null, "good", now).next;
+    const saved = {
+      due: first.due.toISOString(), stability: first.stability, difficulty: first.difficulty,
+      elapsed_days: first.elapsed_days, scheduled_days: first.scheduled_days,
+      learning_steps: first.learning_steps, reps: first.reps, lapses: first.lapses,
+      state: first.state, last_review: first.last_review?.toISOString(),
+    } satisfies FsrsCardState;
+    const good = scheduleCard(saved, "good", new Date(first.due));
+    const forgot = scheduleCard(saved, "again", new Date(first.due));
+    expect(good.next.scheduled_days).toBeGreaterThan(first.scheduled_days);
+    expect(forgot.next.scheduled_days).toBeLessThan(good.next.scheduled_days);
   });
 
   it("formats short and long review intervals", () => {

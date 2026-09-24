@@ -7,7 +7,7 @@ import { getProfile, type Profile } from "@/lib/auth";
 import { cardStateForDatabase, retrievability, scheduleCard } from "@/lib/scheduler";
 import { createClient } from "@/lib/supabase/server";
 import { leetcodeNumberFromSourceId } from "@/lib/utils";
-import { CATALOG_IDS, REVIEW_RATINGS, STUDY_WEEKDAYS, type FsrsCardState, type ReviewRating, type StudyPlanPreferences, type SubmitReviewInput } from "@/lib/types";
+import { CATALOG_IDS, REVIEW_RATINGS, type FsrsCardState, type ReviewRating, type SubmitReviewInput } from "@/lib/types";
 
 export type ActionResult = { ok: true; message?: string; nextDue?: string } | { ok: false; error: string };
 export type ReviewActionResult = {
@@ -20,35 +20,17 @@ export type ReviewActionResult = {
   updatedCard: { problemId: string; dueAt: string; stability: number; lapses: number; repetitions: number; scheduledDays: number; firstAttemptedAt: string };
 } | { ok: false; error: string };
 
-const studyPlanSchema = z.object({
-  easyPerDay: z.number().int().min(0).max(10),
-  mediumPerDay: z.number().int().min(0).max(10),
-  hardPerDay: z.number().int().min(0).max(10),
-  studyDays: z.array(z.enum(STUDY_WEEKDAYS)).min(1).max(7),
-}).superRefine((value, context) => {
-  if (value.easyPerDay + value.mediumPerDay + value.hardPerDay > 10) {
-    context.addIssue({ code: "custom", message: "Keep the combined daily target at 10 problems or fewer." });
-  }
-});
-
-const onboardingStudyPlanSchema = studyPlanSchema.superRefine((value, context) => {
-  if (value.easyPerDay + value.mediumPerDay + value.hardPerDay < 1) {
-    context.addIssue({ code: "custom", message: "Choose at least one new problem for each active study day." });
-  }
-});
-
 async function activeProfile(): Promise<Profile> {
   const profile = await getProfile();
   if (!profile) throw new Error("You need to sign in again.");
   return profile;
 }
 
-export async function saveOnboarding(input: { displayName: string; timezone: string; selectedCatalog: string; studyPlan: Omit<StudyPlanPreferences, "configured"> }): Promise<ActionResult> {
+export async function saveOnboarding(input: { displayName: string; timezone: string; selectedCatalog: string }): Promise<ActionResult> {
   const parsed = z.object({
     displayName: z.string().trim().min(2).max(60),
     timezone: z.string().trim().min(1).max(80),
     selectedCatalog: z.enum(CATALOG_IDS),
-    studyPlan: onboardingStudyPlanSchema,
   }).safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Please enter a name and select a valid study list." };
 
@@ -58,11 +40,6 @@ export async function saveOnboarding(input: { displayName: string; timezone: str
     display_name: parsed.data.displayName,
     timezone: parsed.data.timezone,
     selected_catalog: parsed.data.selectedCatalog,
-    new_easy_per_day: parsed.data.studyPlan.easyPerDay,
-    new_medium_per_day: parsed.data.studyPlan.mediumPerDay,
-    new_hard_per_day: parsed.data.studyPlan.hardPerDay,
-    study_days: parsed.data.studyPlan.studyDays,
-    study_plan_configured_at: new Date().toISOString(),
     onboarding_completed_at: new Date().toISOString(),
   }).eq("id", profile.id);
   if (error) return { ok: false, error: error.message };
@@ -204,25 +181,6 @@ export async function submitReview(input: SubmitReviewInput): Promise<ReviewActi
       firstAttemptedAt: row?.first_attempted_at ?? now.toISOString(),
     },
   };
-}
-
-export async function saveStudyPlanPreferences(input: Omit<StudyPlanPreferences, "configured">): Promise<ActionResult> {
-  const parsed = studyPlanSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Check your study plan." };
-  const profile = await activeProfile();
-  const supabase = await createClient();
-  const { error } = await supabase.from("profiles").update({
-    new_easy_per_day: parsed.data.easyPerDay,
-    new_medium_per_day: parsed.data.mediumPerDay,
-    new_hard_per_day: parsed.data.hardPerDay,
-    study_days: parsed.data.studyDays,
-    study_plan_configured_at: new Date().toISOString(),
-  }).eq("id", profile.id);
-  if (error) return { ok: false, error: error.message };
-  revalidatePath("/today");
-  revalidatePath("/schedule");
-  revalidatePath("/settings");
-  return { ok: true, message: "Study plan saved." };
 }
 
 export async function saveSettings(input: { displayName: string; timezone: string; selectedCatalog: string }): Promise<ActionResult> {

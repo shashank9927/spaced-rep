@@ -21,7 +21,6 @@ drop type if exists public.app_role cascade;
 create type public.app_role as enum ('admin', 'member');
 create type public.problem_difficulty as enum ('Easy', 'Medium', 'Hard');
 create type public.review_rating as enum ('again', 'hard', 'good', 'easy');
-create type public.study_weekday as enum ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun');
 
 create table public.allowed_emails (
   email text primary key check (email = lower(email)),
@@ -40,16 +39,9 @@ create table public.profiles (
   selected_catalog text not null default 'neetcode150' check (selected_catalog in ('neetcode150', 'neetcode250', 'allNC')),
   role public.app_role not null default 'member',
   is_active boolean not null default true,
-  new_easy_per_day smallint not null default 0 check (new_easy_per_day between 0 and 10),
-  new_medium_per_day smallint not null default 0 check (new_medium_per_day between 0 and 10),
-  new_hard_per_day smallint not null default 0 check (new_hard_per_day between 0 and 10),
-  study_days public.study_weekday[] not null default array['mon','tue','wed','thu','fri']::public.study_weekday[],
-  study_plan_configured_at timestamptz,
   onboarding_completed_at timestamptz,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  check (new_easy_per_day + new_medium_per_day + new_hard_per_day <= 10),
-  check (coalesce(array_length(study_days, 1), 0) between 1 and 7)
+  updated_at timestamptz not null default now()
 );
 
 create table public.catalog_snapshots (

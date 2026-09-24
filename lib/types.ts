@@ -7,17 +7,6 @@ export type ReviewRating = (typeof REVIEW_RATINGS)[number];
 export type ProblemDifficulty = "Easy" | "Medium" | "Hard";
 export type ProblemStatus = "new" | "active" | "due";
 
-export const STUDY_WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
-export type StudyWeekday = (typeof STUDY_WEEKDAYS)[number];
-
-export interface StudyPlanPreferences {
-  easyPerDay: number;
-  mediumPerDay: number;
-  hardPerDay: number;
-  studyDays: StudyWeekday[];
-  configured: boolean;
-}
-
 export interface FsrsCardState {
   due: string;
   stability: number;
@@ -86,12 +75,14 @@ export interface ReviewLogSummary {
   previous_due_at: string | null;
   next_due_at: string;
   scheduled_days: number;
-  problems?: { title: string; difficulty: ProblemDifficulty; source_id?: string } | null;
+  problems?: { title: string; difficulty: ProblemDifficulty; source_id?: string; leetcode_number?: number } | null;
 }
+
+export type ScheduleItemKind = "review" | "completed-review" | "completed-attempt";
 
 export interface ScheduleItem {
   dateKey: string;
-  kind: "review" | "new" | "completed-review" | "completed-new";
+  kind: ScheduleItemKind;
   status: "overdue" | "due" | "upcoming" | "completed";
   problem: ProblemSummary;
   dueAt?: string;
@@ -99,7 +90,6 @@ export interface ScheduleItem {
 
 export interface ScheduleDay {
   dateKey: string;
-  isStudyDay: boolean;
   items: ScheduleItem[];
 }
 

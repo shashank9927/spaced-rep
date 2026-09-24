@@ -1,11 +1,11 @@
 import { cache } from "react";
 import { activityForDays, patternStats, queueOrder, reviewStats, type StudyCard } from "@/lib/analytics";
 import { getProfile, type Profile } from "@/lib/auth";
-import { buildScheduleData, getTodayPlan } from "@/lib/study-plan";
+import { buildScheduleData, isDueOnOrBeforeLocalDay } from "@/lib/study-plan";
 import { retrievability } from "@/lib/scheduler";
 import { createClient } from "@/lib/supabase/server";
 import { leetcodeNumberFromSourceId } from "@/lib/utils";
-import type { CatalogProblem, DueProblem, FsrsCardState, ProblemSummary, ReviewLogSummary, ReviewRating, StudyPlanPreferences } from "@/lib/types";
+import type { CatalogProblem, DueProblem, FsrsCardState, ProblemSummary, ReviewLogSummary, ReviewRating } from "@/lib/types";
 
 const CARD_SELECT = "due_at,stability,difficulty,elapsed_days,scheduled_days,learning_steps,reps,lapses,state,last_review_at,last_rating,version,first_attempted_at,problems(id,source_id,leetcode_number,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(topics(name)))";
 const LOG_SELECT = "id,problem_id,rating,reviewed_at,note,previous_due_at,next_due_at,scheduled_days,problems(title,difficulty,source_id,leetcode_number)";
@@ -165,34 +165,20 @@ export async function getCatalogProblems(catalogId: Profile["selected_catalog"])
 export async function getDueQueue(): Promise<DueProblem[]> {
   const snapshot = await cardSnapshot();
   if (!snapshot) return [];
-  return snapshot.cards.filter((card) => new Date(card.card.due_at).getTime() <= snapshot.now.getTime()).sort(queueOrder);
-}
-
-function preferencesFrom(profile: Profile): StudyPlanPreferences {
-  return {
-    easyPerDay: profile.new_easy_per_day ?? 0,
-    mediumPerDay: profile.new_medium_per_day ?? 0,
-    hardPerDay: profile.new_hard_per_day ?? 0,
-    studyDays: profile.study_days ?? ["mon", "tue", "wed", "thu", "fri"],
-    configured: Boolean(profile.study_plan_configured_at),
-  };
+  return snapshot.cards.filter((card) => isDueOnOrBeforeLocalDay(card.card.due_at, snapshot.now, snapshot.profile.timezone)).sort(queueOrder);
 }
 
 export async function getTodayData() {
   const snapshot = await studySnapshot();
   if (!snapshot) return null;
-  const catalogProblems = await catalogProblemsForSnapshot(snapshot.profile.selected_catalog, snapshot.cards);
-  const due = snapshot.cards.filter((card) => new Date(card.card.due_at).getTime() <= snapshot.now.getTime()).sort(queueOrder);
-  const upcoming = snapshot.cards.filter((card) => new Date(card.card.due_at).getTime() > snapshot.now.getTime())
+  const due = snapshot.cards.filter((card) => isDueOnOrBeforeLocalDay(card.card.due_at, snapshot.now, snapshot.profile.timezone)).sort(queueOrder);
+  const upcoming = snapshot.cards.filter((card) => !isDueOnOrBeforeLocalDay(card.card.due_at, snapshot.now, snapshot.profile.timezone))
     .sort((a, b) => new Date(a.card.due_at).getTime() - new Date(b.card.due_at).getTime());
-  const preferences = preferencesFrom(snapshot.profile);
-  const todayPlan = getTodayPlan({ preferences, cards: snapshot.cards, catalogProblems, now: snapshot.now, timezone: snapshot.profile.timezone });
   return {
     ...snapshot,
     due,
     upcoming,
-    stats: reviewStats(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now, snapshot.profile.study_days),
-    todayPlan,
+    stats: reviewStats(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now),
   };
 }
 
@@ -202,7 +188,6 @@ export const getDashboardData = getTodayData;
 export async function getScheduleData(month: string) {
   const snapshot = await cardSnapshot();
   if (!snapshot) return null;
-  const catalogProblems = await catalogProblemsForSnapshot(snapshot.profile.selected_catalog, snapshot.cards);
   const [year, calendarMonth] = month.split("-").map(Number);
   if (!Number.isInteger(year) || !Number.isInteger(calendarMonth) || calendarMonth < 1 || calendarMonth > 12) throw new Error("Invalid schedule month.");
   const first = new Date(Date.UTC(year, calendarMonth - 1, 1));
@@ -212,7 +197,7 @@ export async function getScheduleData(month: string) {
   const logStart = new Date(gridStart.getTime() - 86_400_000);
   const logEnd = new Date(gridStart.getTime() + 43 * 86_400_000);
   const logs = await readLogsInRange(logStart.toISOString(), logEnd.toISOString());
-  return buildScheduleData({ month, preferences: preferencesFrom(snapshot.profile), cards: snapshot.cards, catalogProblems, logs, now: snapshot.now, timezone: snapshot.profile.timezone, selectedCatalog: snapshot.profile.selected_catalog });
+  return buildScheduleData({ month, cards: snapshot.cards, logs, now: snapshot.now, timezone: snapshot.profile.timezone });
 }
 
 export async function getProblemDetail(problemId: string) {
@@ -236,7 +221,7 @@ export async function getProblemDetail(problemId: string) {
 export async function getPatternsData() {
   const snapshot = await studySnapshot();
   if (!snapshot) return null;
-  return { ...snapshot, patterns: patternStats(snapshot.cards), stats: reviewStats(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now, snapshot.profile.study_days) };
+  return { ...snapshot, patterns: patternStats(snapshot.cards), stats: reviewStats(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now) };
 }
 
 export async function getProgressData() {
@@ -244,7 +229,7 @@ export async function getProgressData() {
   if (!snapshot) return null;
   return {
     ...snapshot,
-    stats: reviewStats(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now, snapshot.profile.study_days),
+    stats: reviewStats(snapshot.cards, snapshot.logs, snapshot.profile.timezone, snapshot.now),
     patterns: patternStats(snapshot.cards),
     activity: activityForDays(snapshot.logs, snapshot.profile.timezone, snapshot.now),
   };

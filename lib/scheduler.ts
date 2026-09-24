@@ -6,6 +6,8 @@ const scheduler = fsrs({
   request_retention: 0.9,
   maximum_interval: 365,
   enable_fuzz: false,
+  // Coding reviews are day-sized work, not a minutes-long flashcard session.
+  enable_short_term: false,
 });
 
 const ratingMap: Record<ReviewRating, Grade> = {

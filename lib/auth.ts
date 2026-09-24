@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { cache } from "react";
 import type { User } from "@supabase/supabase-js";
-import type { StudyWeekday } from "@/lib/types";
 import { displayNameFromEmail } from "@/lib/utils";
 import { createAdminClient, createClient } from "@/lib/supabase/server";
 
@@ -13,11 +12,6 @@ export interface Profile {
   selected_catalog: "neetcode150" | "neetcode250" | "allNC";
   role: "admin" | "member";
   is_active: boolean;
-  new_easy_per_day: number;
-  new_medium_per_day: number;
-  new_hard_per_day: number;
-  study_days: StudyWeekday[];
-  study_plan_configured_at: string | null;
 }
 
 export const getProfile = cache(async (): Promise<Profile | null> => {
