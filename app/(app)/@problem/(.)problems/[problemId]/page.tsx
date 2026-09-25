@@ -9,5 +9,5 @@ export default async function ProblemPanel({ params }: { params: Promise<{ probl
   const { problemId } = await params;
   const [profile, detail] = await Promise.all([requireProfile(), getProblemDetail(problemId)]);
   if (!detail) notFound();
-  return <ProblemDetailSheet title={detail.problem.title}><ProblemDetailClient panel problem={detail.problem} card={detail.card} logs={detail.logs} timezone={profile.timezone} options={ratingOptions(detail.card?.card ?? null)} /></ProblemDetailSheet>;
+  return <ProblemDetailSheet title={detail.problem.title}><ProblemDetailClient panel problem={detail.problem} card={detail.card} logs={detail.logs} nextCursor={detail.nextCursor} timezone={profile.timezone} options={ratingOptions(detail.card?.card ?? null)} /></ProblemDetailSheet>;
 }

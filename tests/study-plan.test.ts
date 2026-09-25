@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildScheduleData, isDueOnOrBeforeLocalDay } from "@/lib/study-plan";
+import { buildScheduleAgenda, buildScheduleData, isDueOnOrBeforeLocalDay } from "@/lib/study-plan";
 import type { StudyCard } from "@/lib/analytics";
 import type { ReviewLogSummary } from "@/lib/types";
 
@@ -23,5 +23,18 @@ describe("manual queue schedule", () => {
     expect(schedule.days.find((day) => day.dateKey === "2026-09-23")?.items.some((item) => item.kind === "review" && item.status === "due")).toBe(true);
     expect(schedule.days.find((day) => day.dateKey === "2026-09-22")?.items.some((item) => item.kind === "completed-attempt")).toBe(true);
     expect(schedule.days.flatMap((day) => day.items).every((item) => item.kind !== ("new" as never))).toBe(true);
+  });
+
+  it("always builds fourteen explicit local agenda days across a month boundary", () => {
+    const schedule = buildScheduleAgenda({ cards: [active("review", "2026-02-02T20:00:00.000Z")], logs: [], now: new Date("2026-01-29T07:00:00.000Z"), timezone: "UTC" });
+    expect(schedule.days).toHaveLength(14);
+    expect(schedule.days[0]?.dateKey).toBe("2026-01-29");
+    expect(schedule.days.at(-1)?.dateKey).toBe("2026-02-11");
+    expect(schedule.days.find((day) => day.dateKey === "2026-02-02")?.items[0]).toMatchObject({ kind: "review", status: "upcoming" });
+  });
+
+  it("keeps an overdue card under today and preserves its original due day", () => {
+    const schedule = buildScheduleAgenda({ cards: [active("overdue", "2026-01-26T20:00:00.000Z")], logs: [], now: new Date("2026-01-29T07:00:00.000Z"), timezone: "UTC" });
+    expect(schedule.days[0]?.items[0]).toMatchObject({ status: "overdue", originalDueDateKey: "2026-01-26" });
   });
 });

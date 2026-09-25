@@ -35,18 +35,13 @@ function addItem(days: Map<string, ScheduleDay>, item: ScheduleItem) {
   if (day) day.items.push(item);
 }
 
-/**
- * Builds a calendar from recorded attempts and FSRS cards only. It deliberately
- * does not infer, assign, or forecast new problems.
- */
-export function buildScheduleData({ month, cards, logs, now, timezone }: {
-  month: string;
+function buildDays({ dateKeys, cards, logs, now, timezone }: {
+  dateKeys: string[];
   cards: StudyCard[];
   logs: ReviewLogSummary[];
   now: Date;
   timezone: string;
-}): ScheduleData {
-  const dateKeys = monthGrid(month);
+}) {
   const days = new Map(dateKeys.map((dateKey) => [dateKey, { dateKey, items: [] as ScheduleItem[] }]));
   const todayKey = localDateKey(now, timezone);
   const [startKey, endKey] = [dateKeys[0], dateKeys.at(-1)!];
@@ -60,6 +55,8 @@ export function buildScheduleData({ month, cards, logs, now, timezone }: {
       kind: "review",
       status: dueKey < todayKey ? "overdue" : dueKey === todayKey ? "due" : "upcoming",
       dueAt: card.card.due_at,
+      originalDueAt: dueKey < todayKey ? card.card.due_at : undefined,
+      originalDueDateKey: dueKey < todayKey ? dueKey : undefined,
       problem: card,
     });
   }
@@ -92,5 +89,34 @@ export function buildScheduleData({ month, cards, logs, now, timezone }: {
     const statusOrder = { overdue: 0, due: 1, upcoming: 2, completed: 3 };
     day.items.sort((a, b) => statusOrder[a.status] - statusOrder[b.status] || a.problem.title.localeCompare(b.problem.title));
   }
-  return { month, todayKey, days: Array.from(days.values()) };
+  return { todayKey, days: Array.from(days.values()) };
+}
+
+/**
+ * Builds a calendar from recorded attempts and FSRS cards only. It deliberately
+ * does not infer, assign, or forecast new problems.
+ */
+export function buildScheduleData({ month, cards, logs, now, timezone }: {
+  month: string;
+  cards: StudyCard[];
+  logs: ReviewLogSummary[];
+  now: Date;
+  timezone: string;
+}): ScheduleData {
+  const dateKeys = monthGrid(month);
+  return { month, ...buildDays({ dateKeys, cards, logs, now, timezone }) };
+}
+
+/** A rolling agenda must not reuse the fixed month grid: that grid ends at a
+ * month boundary, while the agenda always promises fourteen consecutive local days. */
+export function buildScheduleAgenda({ cards, logs, now, timezone, count = 14 }: {
+  cards: StudyCard[];
+  logs: ReviewLogSummary[];
+  now: Date;
+  timezone: string;
+  count?: number;
+}) {
+  const start = localDateKey(now, timezone);
+  const dateKeys = Array.from({ length: count }, (_, index) => addCalendarDays(start, index));
+  return buildDays({ dateKeys, cards, logs, now, timezone });
 }

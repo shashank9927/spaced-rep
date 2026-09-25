@@ -17,5 +17,5 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
     params.view === "month" ? getScheduleData(safeMonth) : Promise.resolve(null),
   ]);
   if (!agendaData) return null;
-  return <ScheduleClient agendaData={agendaData} monthData={monthData} />;
+  return <ScheduleClient key={monthData?.month ?? "agenda"} agendaData={agendaData} monthData={monthData} />;
 }

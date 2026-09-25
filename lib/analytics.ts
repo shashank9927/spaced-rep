@@ -47,12 +47,12 @@ export function median(values: number[]): number | null {
 
 export function activeLogs(logs: ReviewLogSummary[]) { return logs.filter((log) => !log.reversed_at); }
 
-export function progressSummary(cards: StudyCard[], logs: ReviewLogSummary[], timezone: string, now = new Date()) {
+export function progressSummary(cards: StudyCard[], logs: ReviewLogSummary[], timezone: string, now = new Date(), scheduledSinceKey?: string) {
   const weekStart = weekStartKey(now, timezone);
   const currentWeek = activeLogs(logs).filter((log) => localDateKey(new Date(log.reviewed_at), timezone) >= weekStart);
   const attempts = currentWeek.filter((log) => log.event_kind === "first_attempt").length;
   const reviews = currentWeek.filter((log) => log.event_kind !== "first_attempt").length;
-  const scheduled = activeLogs(logs).filter((log) => log.event_kind === "scheduled_review");
+  const scheduled = activeLogs(logs).filter((log) => log.event_kind === "scheduled_review" && (!scheduledSinceKey || localDateKey(new Date(log.reviewed_at), timezone) >= scheduledSinceKey));
   const successful = scheduled.filter((log) => log.rating !== "again").length;
   return {
     activeProblemCount: cards.length,
@@ -108,7 +108,12 @@ export function activityForDays(logs: ReviewLogSummary[], timezone: string, now 
 }
 
 function labelForDateKey(dateKey: string, short = false): string {
-  return new Intl.DateTimeFormat("en", { weekday: short ? "narrow" : "short", month: short ? undefined : "short", day: short ? undefined : "numeric", timeZone: "UTC" }).format(new Date(`${dateKey}T12:00:00.000Z`));
+  const date = new Date(`${dateKey}T12:00:00.000Z`);
+  const weekday = new Intl.DateTimeFormat("en", { weekday: "short", timeZone: "UTC" }).format(date);
+  const day = new Intl.DateTimeFormat("en", { day: "numeric", timeZone: "UTC" }).format(date);
+  if (short) return `${weekday} ${day}`;
+  const month = new Intl.DateTimeFormat("en", { month: "short", timeZone: "UTC" }).format(date);
+  return `${weekday}, ${month} ${day}`;
 }
 
 export function reviewLoadForCards(cards: StudyCard[], logs: ReviewLogSummary[], timezone: string, now = new Date(), count = 14): ReviewLoadPayload {
@@ -123,5 +128,10 @@ export function reviewLoadForCards(cards: StudyCard[], logs: ReviewLogSummary[],
   }
   const totalDueNext14Days = days.reduce((total, day) => total + day.dueCount, 0);
   const peakDay = days.reduce<ReviewLoadPayload["peakDay"]>((peak, day) => day.dueCount && (!peak || day.dueCount > peak.dueCount) ? day : peak, null);
-  return { overdueCount, totalDueNext14Days, peakDay, days };
+  const windowEnd = days.at(-1)?.dateKey ?? today;
+  const nextCard = cards
+    .map((card) => ({ card, dateKey: localDateKey(new Date(card.card.due_at), timezone) }))
+    .filter(({ dateKey }) => dateKey > windowEnd)
+    .sort((a, b) => new Date(a.card.card.due_at).getTime() - new Date(b.card.card.due_at).getTime())[0];
+  return { overdueCount, totalDueNext14Days, peakDay, nextReviewAfterWindow: nextCard ? { dateKey: nextCard.dateKey, label: labelForDateKey(nextCard.dateKey) } : null, days };
 }

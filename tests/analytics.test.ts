@@ -56,6 +56,14 @@ describe("study analytics", () => {
     expect(load.peakDay).toBeNull();
   });
 
+  it("reports the next real review beyond an otherwise empty window with unambiguous labels", () => {
+    const later = card({ card: { ...card().card, due_at: "2026-10-12T10:00:00.000Z" } });
+    const load = reviewLoadForCards([later], [], "UTC", new Date("2026-09-24T10:00:00.000Z"));
+    expect(load.totalDueNext14Days).toBe(0);
+    expect(load.nextReviewAfterWindow).toMatchObject({ dateKey: "2026-10-12" });
+    expect(load.days[0]?.shortLabel).toMatch(/^Thu 24$/);
+  });
+
   it("counts only scheduled, non-undone reviews for the recall sample", () => {
     const logs: ReviewLogSummary[] = Array.from({ length: 20 }, (_, index) => ({
       id: "scheduled-" + index, problem_id: card().id, rating: index === 0 ? "again" as const : "good" as const,
@@ -66,6 +74,15 @@ describe("study analytics", () => {
     const summary = progressSummary([card()], logs, "UTC", new Date("2026-09-24T12:00:00.000Z"));
     expect(summary.scheduledRecallSampleSize).toBe(20);
     expect(summary.scheduledRecallRate).toBeCloseTo(.95);
+  });
+
+  it("uses the exact local-date recall window instead of a rolling timestamp approximation", () => {
+    const logs: ReviewLogSummary[] = [
+      { id: "inside", problem_id: card().id, rating: "good", reviewed_at: "2026-06-27T00:01:00.000Z", note: null, previous_due_at: "2026-06-26T10:00:00.000Z", next_due_at: "2026-06-30T10:00:00.000Z", scheduled_days: 3, event_kind: "scheduled_review" },
+      { id: "outside", problem_id: card().id, rating: "again", reviewed_at: "2026-06-26T23:59:00.000Z", note: null, previous_due_at: "2026-06-25T10:00:00.000Z", next_due_at: "2026-06-27T10:00:00.000Z", scheduled_days: 1, event_kind: "scheduled_review" },
+    ];
+    const summary = progressSummary([card()], logs, "UTC", new Date("2026-09-24T12:00:00.000Z"), "2026-06-27");
+    expect(summary.scheduledRecallSampleSize).toBe(1);
   });
 
   it("prioritizes due cards ahead of recent hard cards in reinforcement", () => {

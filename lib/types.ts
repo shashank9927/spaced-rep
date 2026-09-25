@@ -80,6 +80,8 @@ export interface ProblemDeckPayload {
 
 export interface ScheduleAgendaPayload {
   todayKey: string;
+  /** The last month a member can browse in the calendar. */
+  maxMonth: string;
   days: ScheduleDay[];
 }
 
@@ -171,6 +173,9 @@ export interface ScheduleItem {
   status: "overdue" | "due" | "upcoming" | "completed";
   problem: ProblemSummary;
   dueAt?: string;
+  /** Kept when an overdue card is surfaced under Today rather than its past date. */
+  originalDueAt?: string;
+  originalDueDateKey?: string;
 }
 
 export interface ScheduleDay {
@@ -195,6 +200,8 @@ export interface ReviewLoadPayload {
   overdueCount: number;
   totalDueNext14Days: number;
   peakDay: ReviewLoadDay | null;
+  /** The first real FSRS review after the displayed fourteen-day window. */
+  nextReviewAfterWindow: { dateKey: string; label: string } | null;
   days: ReviewLoadDay[];
 }
 

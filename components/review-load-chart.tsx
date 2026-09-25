@@ -13,16 +13,16 @@ export function ReviewLoadChart({ load }: { load: ReviewLoadPayload }) {
       <div><h2 className="flex items-center gap-2 text-sm font-semibold"><CalendarClock size={15} className="text-primary" />Review load</h2><p className="mt-0.5 text-xs text-muted-foreground">Real FSRS review dates over the next 14 local days.</p></div>
       <div className="flex flex-wrap gap-2 text-xs"><Chip tone="overdue" label={`${load.overdueCount} overdue`} /><Chip tone="today" label={`${load.totalDueNext14Days} scheduled`} />{load.peakDay && <Chip tone="peak" label={`Busiest ${load.peakDay.label} · ${load.peakDay.dueCount}`} />}</div>
     </div>
-    {load.totalDueNext14Days === 0 && load.overdueCount === 0 ? <div className="grid min-h-40 place-items-center px-5 py-8 text-center text-sm text-muted-foreground">Record your first attempt to build your review schedule.</div> : <>
+    {load.totalDueNext14Days === 0 && load.overdueCount === 0 ? <div className="grid min-h-40 place-items-center px-5 py-8 text-center text-sm text-muted-foreground">{load.nextReviewAfterWindow ? <>No reviews due in the next 14 days. Your next review is {load.nextReviewAfterWindow.label}.</> : "Record your first attempt to build your review schedule."}</div> : <>
       <div className="overflow-x-auto px-3 py-4 sm:px-5"><div className="min-w-[44rem]">
-        <div className="grid h-40 grid-cols-[repeat(14,minmax(0,1fr))] items-end gap-1.5 border-b border-border" role="list" aria-label="Reviews due over the next 14 days">
+        <div className="grid h-40 grid-cols-[repeat(14,minmax(0,1fr))] items-end gap-1.5 border-b border-border" aria-label="Reviews due over the next 14 days">
           {load.days.map((day) => {
             const due = day.isToday ? day.remainingTodayCount ?? day.dueCount : day.futureDueCount ?? day.dueCount;
             const total = due + day.completedCount;
             const completedHeight = `${Math.max(day.completedCount ? 4 : 0, day.completedCount / max * 100)}%`;
             const dueHeight = `${Math.max(due ? 4 : 0, due / max * 100)}%`;
             const label = `${day.fullLabel ?? day.label}: ${due} ${day.isToday ? "remaining" : "scheduled"}, ${day.completedCount} completed scheduled reviews`;
-            return <button type="button" key={day.dateKey} aria-label={label} title={label} onFocus={() => setActiveDay(day.dateKey)} onBlur={() => setActiveDay(null)} onMouseEnter={() => setActiveDay(day.dateKey)} onMouseLeave={() => setActiveDay(null)} className="group relative flex h-full min-w-0 flex-col justify-end rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card" role="listitem">
+            return <button type="button" key={day.dateKey} aria-label={label} title={label} onFocus={() => setActiveDay(day.dateKey)} onBlur={() => setActiveDay(null)} onMouseEnter={() => setActiveDay(day.dateKey)} onMouseLeave={() => setActiveDay(null)} className="group relative flex h-full min-w-0 flex-col justify-end rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card">
               {total > 0 && <span className="mb-1 text-center font-mono text-[10px] text-muted-foreground">{total}</span>}
               {day.completedCount > 0 && <span className="w-full origin-bottom rounded-t-sm bg-emerald-500 motion-safe:animate-[chart-rise_220ms_ease-out]" style={{ height: completedHeight }} />}
               {due > 0 && <span className={`w-full origin-bottom ${day.completedCount ? "mt-px" : "rounded-t-sm"} rounded-b-sm ${day.isToday ? "bg-primary" : "bg-cyan-500"} motion-safe:animate-[chart-rise_220ms_ease-out]`} style={{ height: dueHeight }} />}

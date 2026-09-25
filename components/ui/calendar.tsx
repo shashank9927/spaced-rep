@@ -23,6 +23,10 @@ export function Calendar({
     selected={selected}
     onDayClick={onSelect}
     modifiers={modifiers}
+    modifiersClassNames={{
+      review: "rc-calendar-review",
+      completed: "rc-calendar-completed",
+    }}
     classNames={{
       root: "w-full min-w-[34rem] text-sm",
       months: "w-full",

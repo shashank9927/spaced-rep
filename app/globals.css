@@ -153,9 +153,8 @@ html[data-theme="dark"] .daily-section,html[data-theme="dark"] .upcoming-preview
 
 /* Calendar modifiers are deliberately subtle: a date can carry more than one
    workload signal, while the selected state must remain the clearest cue. */
-.rc-calendar .rdp-day_review:not(.rdp-selected) button { box-shadow:inset 0 -2px 0 #f2b35c; }
-.rc-calendar .rdp-day_new:not(.rdp-selected) button { box-shadow:inset 0 -2px 0 var(--primary); }
-.rc-calendar .rdp-day_completed:not(.rdp-selected) button { color:var(--green); }
+.rc-calendar .rc-calendar-review:not(.rdp-selected) button { box-shadow:inset 0 -2px 0 #f2b35c; }
+.rc-calendar .rc-calendar-completed:not(.rdp-selected) button { color:var(--green); }
 @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto !important; animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; } }
 
 /* Contrast-safe compatibility styles for the older class-based surfaces. */
