@@ -30,7 +30,7 @@ function NavigationLinks({ mobile = false }: { mobile?: boolean }) {
     const active = pathname === href || pathname.startsWith(`${href}/`);
     const classes = mobile
       ? cn("grid min-h-12 place-items-center content-center gap-0.5 rounded-lg text-[10px] font-medium text-muted-foreground", active && "bg-accent text-accent-foreground")
-      : cn("flex min-h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:text-foreground", active && "bg-secondary text-foreground shadow-sm");
+      : cn("flex min-h-9 items-center gap-1.5 rounded-md px-3 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:text-foreground", active && "bg-secondary text-foreground");
     return <PendingLink prefetch className={classes} href={href} key={href}><Icon size={mobile ? 17 : 14} />{mobile ? <span>{label}</span> : label}</PendingLink>;
   })}</>;
 }
@@ -39,7 +39,7 @@ function NavigationFallback({ mobile = false }: { mobile?: boolean }) {
   return <>{navigation.map(({ href, label, icon: Icon }) => {
     const classes = mobile
       ? "grid min-h-12 place-items-center content-center gap-0.5 rounded-lg text-[10px] font-medium text-muted-foreground"
-      : "flex min-h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground";
+      : "flex min-h-9 items-center gap-1.5 rounded-md px-3 text-xs font-medium text-muted-foreground";
     return <Link prefetch href={href} className={classes} key={href}><Icon size={mobile ? 17 : 14} />{mobile ? <span>{label}</span> : label}</Link>;
   })}</>;
 }
@@ -62,8 +62,8 @@ export function AppShell({ children, controls, problem }: { children: ReactNode;
   }), []);
 
   return <TooltipProvider delayDuration={250}><div className="min-h-dvh bg-background text-foreground">
-    <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur-xl"><div className="mx-auto flex h-15 w-full max-w-[1440px] items-center gap-3 px-4 sm:px-6 lg:px-8"><Link href="/today" className="flex shrink-0 items-center gap-2.5 font-semibold tracking-[-.035em]"><span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground shadow-[0_0_0_1px_color-mix(in_srgb,var(--primary)_65%,transparent)]"><Code2 size={17} strokeWidth={2.4} /></span><span className="hidden text-[15px] sm:inline">RecallCode</span></Link><nav className="ml-2 hidden items-center gap-0.5 rounded-lg border border-border bg-card/60 p-1 md:flex" aria-label="Main navigation"><Suspense fallback={<NavigationFallback />}><NavigationLinks /></Suspense></nav><div className="ml-auto flex min-w-0 items-center gap-1.5">{controls}<ThemeButton theme={theme} onToggle={toggleTheme} /></div></div></header>
-    <main className="mx-auto w-full max-w-[1440px] px-4 py-7 pb-24 sm:px-6 md:py-9 md:pb-12 lg:px-8">{children}</main>
+    <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur-xl"><div className="mx-auto flex h-15 w-full max-w-[1440px] items-center gap-3 px-4 sm:px-6 lg:px-8"><Link href="/today" className="flex shrink-0 items-center gap-2.5 font-semibold tracking-[-.035em]"><span className="grid size-8 place-items-center rounded-md bg-primary text-primary-foreground"><Code2 size={17} strokeWidth={2.4} /></span><span className="hidden text-[15px] sm:inline">RecallCode</span></Link><nav className="ml-2 hidden items-center gap-0.5 rounded-lg border border-border bg-card/60 p-1 md:flex" aria-label="Main navigation"><Suspense fallback={<NavigationFallback />}><NavigationLinks /></Suspense></nav><div className="ml-auto flex min-w-0 items-center gap-1.5">{controls}<ThemeButton theme={theme} onToggle={toggleTheme} /></div></div></header>
+    <main className="mx-auto w-full max-w-[1280px] px-4 py-6 pb-24 sm:px-6 md:py-8 md:pb-12 lg:px-8">{children}</main>
     <nav className="fixed inset-x-2 bottom-[max(.5rem,env(safe-area-inset-bottom))] z-30 grid grid-cols-4 rounded-xl border border-border bg-card/94 p-1 shadow-2xl backdrop-blur-xl md:hidden" aria-label="Main navigation"><Suspense fallback={<NavigationFallback mobile />}><NavigationLinks mobile /></Suspense></nav>
     {problem}
     <Toaster theme={theme} position="bottom-right" richColors closeButton />

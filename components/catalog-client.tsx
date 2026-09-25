@@ -37,7 +37,7 @@ export function CatalogClient({ initialStatus = "all", initialTopic = "all", pro
   const changeFilter = (next: StatusFilter) => { setStatus(next); setVisible(60); };
 
   return <section className="mx-auto max-w-6xl">
-    <header className="mb-6 flex flex-wrap items-end justify-between gap-4"><div><div className="mb-2 flex items-center gap-2 font-mono text-[10px] font-medium uppercase tracking-[.14em] text-muted-foreground"><span className="size-1.5 rounded-full bg-cyan-500" />Problem deck</div><h1 className="text-3xl font-semibold tracking-[-.035em] sm:text-4xl">Problems</h1><p className="mt-2 text-sm text-muted-foreground">Browse the active catalog. Progress follows each problem across every catalog.</p></div><span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{problems.length} indexed</span></header>
+    <header className="mb-6 flex flex-wrap items-end justify-between gap-4"><div><div className="mb-2 flex items-center gap-2 font-mono text-[10px] font-medium uppercase tracking-[.14em] text-muted-foreground"><span className="size-1.5 rounded-full bg-info" />Problem deck</div><h1 className="text-3xl font-semibold tracking-[-.035em] sm:text-4xl">Problems</h1><p className="mt-2 text-sm text-muted-foreground">Browse the active catalog. Progress follows each problem across every catalog.</p></div><span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{problems.length} indexed</span></header>
 
     <section className="mb-4 grid overflow-hidden rounded-lg border border-border bg-card sm:grid-cols-3"><MiniStat label="Active" value={activeCount} detail="Started problems" /><MiniStat label="Due" value={dueCount} detail="Need review now" tone={dueCount ? "due" : undefined} /><MiniStat label="New" value={problems.length - activeCount} detail="Not started" /></section>
 
@@ -48,5 +48,5 @@ export function CatalogClient({ initialStatus = "all", initialTopic = "all", pro
 }
 
 function MiniStat({ label, value, detail, tone }: { label: string; value: number; detail: string; tone?: "due" }) {
-  return <div className="border-b border-border px-4 py-3 last:border-0 sm:border-b-0 sm:border-r sm:last:border-r-0"><div className="flex items-baseline justify-between gap-3"><span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span><strong className={cn("text-lg font-semibold", tone === "due" && "text-rose-600 dark:text-rose-300")}>{value}</strong></div><p className="mt-0.5 text-xs text-muted-foreground">{detail}</p></div>;
+  return <div className="border-b border-border px-4 py-3 last:border-0 sm:border-b-0 sm:border-r sm:last:border-r-0"><div className="flex items-baseline justify-between gap-3"><span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span><strong className={cn("text-lg font-semibold", tone === "due" && "text-destructive")}>{value}</strong></div><p className="mt-0.5 text-xs text-muted-foreground">{detail}</p></div>;
 }
