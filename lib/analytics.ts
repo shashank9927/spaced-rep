@@ -1,4 +1,4 @@
-import type { DueProblem, ReviewLoadPayload, ReviewLogSummary, ReviewRating } from "@/lib/types";
+import type { ActivityDay, ActivitySummary, DueProblem, RecallOutcomeWeek, ReviewLoadPayload, ReviewLogSummary, ReviewRating } from "@/lib/types";
 import { localDateKey } from "@/lib/utils";
 
 export type StudyCard = DueProblem & {
@@ -49,16 +49,28 @@ export function activeLogs(logs: ReviewLogSummary[]) { return logs.filter((log) 
 
 export function progressSummary(cards: StudyCard[], logs: ReviewLogSummary[], timezone: string, now = new Date(), scheduledSinceKey?: string) {
   const weekStart = weekStartKey(now, timezone);
-  const currentWeek = activeLogs(logs).filter((log) => localDateKey(new Date(log.reviewed_at), timezone) >= weekStart);
+  const today = localDateKey(now, timezone);
+  const active = activeLogs(logs).filter((log) => {
+    const key = localDateKey(new Date(log.reviewed_at), timezone);
+    return key <= today;
+  });
+  const currentWeek = active.filter((log) => {
+    const key = localDateKey(new Date(log.reviewed_at), timezone);
+    return key >= weekStart && key <= today;
+  });
   const attempts = currentWeek.filter((log) => log.event_kind === "first_attempt").length;
-  const reviews = currentWeek.filter((log) => log.event_kind !== "first_attempt").length;
-  const scheduled = activeLogs(logs).filter((log) => log.event_kind === "scheduled_review" && (!scheduledSinceKey || localDateKey(new Date(log.reviewed_at), timezone) >= scheduledSinceKey));
+  const reviews = currentWeek.filter((log) => log.event_kind === "scheduled_review").length;
+  const earlyReviews = currentWeek.filter((log) => log.event_kind === "early_review").length;
+  const activeStudyDaysThisWeek = new Set(currentWeek.map((log) => localDateKey(new Date(log.reviewed_at), timezone))).size;
+  const scheduled = active.filter((log) => log.event_kind === "scheduled_review" && (!scheduledSinceKey || localDateKey(new Date(log.reviewed_at), timezone) >= scheduledSinceKey));
   const successful = scheduled.filter((log) => log.rating !== "again").length;
   return {
     activeProblemCount: cards.length,
     medianIntervalDays: median(cards.map((card) => card.card.scheduled_days).filter((days) => days > 0)),
     firstAttemptsThisWeek: attempts,
     completedReviewsThisWeek: reviews,
+    earlyReviewsThisWeek: earlyReviews,
+    activeStudyDaysThisWeek,
     scheduledRecallRate: scheduled.length >= 20 ? successful / scheduled.length : null,
     scheduledRecallSampleSize: scheduled.length,
   };
@@ -107,6 +119,82 @@ export function activityForDays(logs: ReviewLogSummary[], timezone: string, now 
   return keys.map((key) => ({ key, ...byDay.get(key) ?? { attempts: 0, scheduled: 0, early: 0 } }));
 }
 
+/** Returns twelve Monday–Sunday calendar weeks, with future days marked rather than counted as inactivity. */
+export function activityForWeeks(logs: ReviewLogSummary[], timezone: string, now = new Date(), weekCount = 12): ActivityDay[] {
+  const today = localDateKey(now, timezone);
+  let cursor = weekStartKey(now, timezone);
+  const daysToSubtract = (weekCount - 1) * 7;
+  for (let index = 0; index < daysToSubtract; index += 1) cursor = previousDateKey(cursor);
+  const byDay = new Map<string, { attempts: number; scheduled: number; early: number }>();
+  for (const log of activeLogs(logs)) {
+    const key = localDateKey(new Date(log.reviewed_at), timezone);
+    const value = byDay.get(key) ?? { attempts: 0, scheduled: 0, early: 0 };
+    if (log.event_kind === "first_attempt") value.attempts += 1;
+    else if (log.event_kind === "early_review") value.early += 1;
+    else value.scheduled += 1;
+    byDay.set(key, value);
+  }
+  return Array.from({ length: weekCount * 7 }, (_, index) => {
+    const key = nextDateKeyBy(cursor, index);
+    return { key, ...byDay.get(key) ?? { attempts: 0, scheduled: 0, early: 0 }, isFuture: key > today };
+  });
+}
+
+function nextDateKeyBy(key: string, amount: number) {
+  const date = new Date(`${key}T12:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + amount);
+  return date.toISOString().slice(0, 10);
+}
+
+function dateLabel(dateKey: string) {
+  return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${dateKey}T12:00:00.000Z`));
+}
+
+export function activitySummaryForDays(days: ActivityDay[]): ActivitySummary {
+  const elapsed = days.filter((day) => !day.isFuture);
+  const totals = elapsed.reduce((sum, day) => ({
+    firstAttempts: sum.firstAttempts + day.attempts,
+    scheduledReviews: sum.scheduledReviews + day.scheduled,
+    earlyReviews: sum.earlyReviews + day.early,
+    activeDays: sum.activeDays + (day.attempts + day.scheduled + day.early > 0 ? 1 : 0),
+  }), { firstAttempts: 0, scheduledReviews: 0, earlyReviews: 0, activeDays: 0 });
+  return { ...totals, totalEvents: totals.firstAttempts + totals.scheduledReviews + totals.earlyReviews };
+}
+
+export function recallOutcomesForWeeks(logs: ReviewLogSummary[], timezone: string, now = new Date(), weekCount = 12): RecallOutcomeWeek[] {
+  const currentWeekKey = weekStartKey(now, timezone);
+  let firstWeekKey = currentWeekKey;
+  for (let index = 1; index < weekCount; index += 1) firstWeekKey = nextDateKeyBy(firstWeekKey, -7);
+  const keys = Array.from({ length: weekCount }, (_, index) => nextDateKeyBy(firstWeekKey, index * 7));
+  const buckets = new Map(keys.map((key) => [key, { recalledCount: 0, forgotCount: 0 }]));
+  const today = localDateKey(now, timezone);
+  for (const log of activeLogs(logs)) {
+    if (log.event_kind !== "scheduled_review") continue;
+    const reviewedKey = localDateKey(new Date(log.reviewed_at), timezone);
+    if (reviewedKey > today) continue;
+    const date = new Date(`${reviewedKey}T12:00:00.000Z`);
+    date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
+    const weekKey = date.toISOString().slice(0, 10);
+    const bucket = buckets.get(weekKey);
+    if (!bucket) continue;
+    if (log.rating === "again") bucket.forgotCount += 1;
+    else bucket.recalledCount += 1;
+  }
+  return keys.map((weekKey) => {
+    const bucket = buckets.get(weekKey)!;
+    const sampleSize = bucket.recalledCount + bucket.forgotCount;
+    return {
+      weekKey,
+      label: dateLabel(weekKey),
+      recalledCount: bucket.recalledCount,
+      forgotCount: bucket.forgotCount,
+      sampleSize,
+      recallRate: sampleSize ? bucket.recalledCount / sampleSize : null,
+      isCurrentWeek: weekKey === currentWeekKey,
+    };
+  });
+}
+
 function labelForDateKey(dateKey: string, short = false): string {
   const date = new Date(`${dateKey}T12:00:00.000Z`);
   const weekday = new Intl.DateTimeFormat("en", { weekday: "short", timeZone: "UTC" }).format(date);
@@ -127,7 +215,7 @@ export function reviewLoadForCards(cards: StudyCard[], logs: ReviewLogSummary[],
     days.push({ dateKey: cursor, label: labelForDateKey(cursor), shortLabel: labelForDateKey(cursor, true), fullLabel: labelForDateKey(cursor), dueCount, completedCount, completedReviewCount: completedCount, remainingTodayCount: cursor === today ? dueCount : 0, futureDueCount: cursor === today ? 0 : dueCount, isToday: cursor === today }); cursor = nextDateKey(cursor);
   }
   const totalDueNext14Days = days.reduce((total, day) => total + day.dueCount, 0);
-  const peakDay = days.reduce<ReviewLoadPayload["peakDay"]>((peak, day) => day.dueCount && (!peak || day.dueCount > peak.dueCount) ? day : peak, null);
+  const peakDay = days.filter((day) => !day.isToday).reduce<ReviewLoadPayload["peakDay"]>((peak, day) => day.dueCount && (!peak || day.dueCount > peak.dueCount) ? day : peak, null);
   const windowEnd = days.at(-1)?.dateKey ?? today;
   const nextCard = cards
     .map((card) => ({ card, dateKey: localDateKey(new Date(card.card.due_at), timezone) }))

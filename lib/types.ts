@@ -63,6 +63,7 @@ export interface CatalogProblemSummary {
 
 export interface TodayPayload {
   timezone: string;
+  todayKey: string;
   dueReviews: DueProblem[];
   upcomingReviews: DueProblem[];
   firstAttemptsThisWeek: number;
@@ -71,8 +72,15 @@ export interface TodayPayload {
   medianIntervalDays: number | null;
 }
 
+export interface DueQueuePayload {
+  timezone: string;
+  todayKey: string;
+  problems: DueProblem[];
+}
+
 export interface ProblemDeckPayload {
   catalogId: CatalogId;
+  todayKey: string;
   problems: CatalogProblemSummary[];
   activeCount: number;
   dueCount: number;
@@ -102,6 +110,8 @@ export interface ProgressSummary {
   medianIntervalDays: number | null;
   firstAttemptsThisWeek: number;
   completedReviewsThisWeek: number;
+  earlyReviewsThisWeek: number;
+  activeStudyDaysThisWeek: number;
   scheduledRecallRate: number | null;
   scheduledRecallSampleSize: number;
 }
@@ -111,6 +121,25 @@ export interface ActivityDay {
   attempts: number;
   scheduled: number;
   early: number;
+  isFuture?: boolean;
+}
+
+export interface ActivitySummary {
+  activeDays: number;
+  totalEvents: number;
+  firstAttempts: number;
+  scheduledReviews: number;
+  earlyReviews: number;
+}
+
+export interface RecallOutcomeWeek {
+  weekKey: string;
+  label: string;
+  recalledCount: number;
+  forgotCount: number;
+  sampleSize: number;
+  recallRate: number | null;
+  isCurrentWeek: boolean;
 }
 
 export interface PatternSignal {
@@ -123,10 +152,13 @@ export interface PatternSignal {
 
 export interface ProgressPayload {
   timezone: string;
+  todayKey: string;
   hasCards: boolean;
   stats: ProgressSummary;
   reviewLoad: ReviewLoadPayload;
   activity: ActivityDay[];
+  activitySummary: ActivitySummary;
+  recallOutcomes: RecallOutcomeWeek[];
   attention: AttentionProblem[];
   patterns: PatternSignal[];
 }

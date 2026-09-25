@@ -19,7 +19,7 @@ async function ScheduleContent({ searchParams }: { searchParams: Promise<{ month
     params.view === "month" ? getScheduleData(safeMonth) : Promise.resolve(null),
   ]);
   if (!agendaData) return null;
-  return <ScheduleClient key={monthData?.month ?? "agenda"} agendaData={agendaData} monthData={monthData} />;
+  return <ScheduleClient key={`${monthData?.month ?? "agenda"}:${agendaData.todayKey}`} agendaData={agendaData} monthData={monthData} />;
 }
 
 export default function SchedulePage({ searchParams }: { searchParams: Promise<{ month?: string; view?: string }> }) { return <Suspense fallback={<RouteLoading />}><ScheduleContent searchParams={searchParams} /></Suspense>; }

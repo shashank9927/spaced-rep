@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { ArrowRight, CalendarDays, CheckCircle2, ChevronRight, Play, Search } from "lucide-react";
 import type { DueProblem } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { formatRelativeDue, localDateKey } from "@/lib/utils";
+import { formatDate, localDateKey } from "@/lib/utils";
 
 type Stats = { firstAttemptsThisWeek: number; completedReviewsThisWeek: number; activeProblemCount: number; medianIntervalDays: number | null };
 
@@ -15,15 +15,17 @@ function DifficultyBadge({ difficulty }: { difficulty: "Easy" | "Medium" | "Hard
   return <Badge variant={difficulty.toLowerCase() as "easy" | "medium" | "hard"}>{difficulty}</Badge>;
 }
 
-function dueLabel(dueAt: string, timezone: string) {
-  const now = new Date();
-  if (localDateKey(new Date(dueAt), timezone) === localDateKey(now, timezone)) return new Date(dueAt) > now ? "Due today" : "Due now";
-  return formatRelativeDue(dueAt);
+function dueLabel(dueAt: string, timezone: string, today: string) {
+  const key = localDateKey(new Date(dueAt), timezone);
+  return key < today ? "Overdue" : "Due today";
 }
 
-export function TodayClient({ initialDue, upcoming, stats, timezone }: { initialDue: DueProblem[]; upcoming: DueProblem[]; stats: Stats; timezone: string }) {
+export function TodayClient({ initialDue, upcoming, stats, timezone, todayKey }: { initialDue: DueProblem[]; upcoming: DueProblem[]; stats: Stats; timezone: string; todayKey: string }) {
   const router = useRouter();
   const preview = upcoming.slice(0, 3);
+  const mountedDay = useRef(todayKey);
+
+  useEffect(() => { mountedDay.current = todayKey; }, [todayKey]);
 
   useEffect(() => {
     if (!initialDue.length) return;
@@ -36,18 +38,25 @@ export function TodayClient({ initialDue, upcoming, stats, timezone }: { initial
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [initialDue.length, router]);
 
+  useEffect(() => {
+    const refreshAtBoundary = () => { const key = localDateKey(new Date(), timezone); if (key !== mountedDay.current) { mountedDay.current = key; router.refresh(); } };
+    const timer = window.setInterval(refreshAtBoundary, 30_000);
+    document.addEventListener("visibilitychange", refreshAtBoundary);
+    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", refreshAtBoundary); };
+  }, [router, timezone]);
+
   return <div className="mx-auto max-w-6xl">
     <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div><div className="mb-2 flex items-center gap-2 font-mono text-[10px] font-medium uppercase tracking-[.14em] text-muted-foreground"><span className="size-1.5 rounded-full bg-info" />Manual practice</div><h1 className="text-3xl font-semibold tracking-[-.035em] sm:text-4xl">Today</h1><p className="mt-2 max-w-xl text-sm text-muted-foreground">Choose new problems yourself. RecallCode only schedules them after you record an attempt.</p></div>
-      <div className="flex flex-wrap gap-2"><Button asChild variant="outline"><Link href="/problems"><Search size={15} /> Choose a new problem</Link></Button>{initialDue.length > 0 && <Button asChild><Link href="/review"><Play size={15} /> Start reviews <kbd className="ml-1 rounded bg-primary-foreground/15 px-1.5 py-0.5 font-mono text-[9px]">R</kbd></Link></Button>}</div>
+      <div className="flex flex-wrap gap-2">{initialDue.length > 0 ? <Button asChild><Link href="/review"><Play size={15} /> Start reviews <kbd className="ml-1 rounded bg-primary-foreground/15 px-1.5 py-0.5 font-mono text-[9px]">R</kbd></Link></Button> : <Button asChild><Link href="/problems"><Search size={15} /> Choose a problem</Link></Button>}</div>
     </header>
 
-    <section className="mb-5 grid overflow-hidden rounded-lg border border-border bg-card sm:grid-cols-3"><Signal label="Reviews due" value={String(initialDue.length)} detail={initialDue.length ? "Complete these first" : "Nothing waiting"} tone={initialDue.length ? "due" : "success"} /><Signal label="This week" value={String(stats.firstAttemptsThisWeek + stats.completedReviewsThisWeek)} detail={stats.firstAttemptsThisWeek + " attempts · " + stats.completedReviewsThisWeek + " reviews"} /><Signal label="Active problems" value={String(stats.activeProblemCount)} detail={stats.medianIntervalDays == null ? "No typical interval yet" : "Typical interval " + Math.round(stats.medianIntervalDays) + "d"} tone="accent" /></section>
+    <section className="mb-5 grid overflow-hidden rounded-lg border border-border bg-card sm:grid-cols-3"><Signal label="Reviews due" value={String(initialDue.length)} detail={initialDue.length ? "Complete these first" : "Nothing waiting"} tone={initialDue.length ? "due" : "success"} /><Signal label="This week" value={String(stats.firstAttemptsThisWeek + stats.completedReviewsThisWeek)} detail={stats.firstAttemptsThisWeek + " attempts · " + stats.completedReviewsThisWeek + " reviews"} /><Signal label="Active problems" value={String(stats.activeProblemCount)} detail={stats.medianIntervalDays == null ? "Typical review spacing is building" : "Typical review spacing · " + Math.round(stats.medianIntervalDays) + "d"} tone="accent" /></section>
 
     <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(280px,.55fr)]">
-      <section className="overflow-hidden rounded-lg border border-border bg-card"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3"><div><h2 className="text-sm font-semibold">Due reviews</h2><p className="mt-0.5 text-xs text-muted-foreground">Everything due today or overdue, ordered by what is most at risk.</p></div>{initialDue.length > 0 && <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">FSRS priority</span>}</div>{initialDue.length ? <div className="divide-y divide-border">{initialDue.map((problem) => <Link href={`/problems/${problem.id}`} className="group grid min-h-16 grid-cols-[2.75rem_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 transition-colors hover:bg-accent sm:grid-cols-[3.25rem_minmax(0,1fr)_5rem_5.5rem_1rem]" key={problem.id}><span className="font-mono text-xs text-muted-foreground">#{problem.leetcodeNumber}</span><span className="min-w-0"><span className="block truncate text-sm font-medium">{problem.title}</span><span className="mt-0.5 block truncate text-xs text-muted-foreground">{problem.primaryTopic ?? problem.topics[0] ?? "Problem"}{problem.latest_rating ? ` · last: ${problem.latest_rating === "again" ? "Forgot" : problem.latest_rating}` : ""}</span></span><span className="hidden sm:block"><DifficultyBadge difficulty={problem.difficulty} /></span><span className="hidden text-right sm:block"><span className="block text-xs font-medium text-destructive">{dueLabel(problem.card.due_at, timezone)}</span><span className="mt-0.5 block font-mono text-[9px] text-muted-foreground">{problem.card.scheduled_days}d interval</span></span><ChevronRight size={15} className="text-muted-foreground transition-transform group-hover:translate-x-0.5" /></Link>)}</div> : <div className="flex min-h-32 flex-wrap items-center gap-3 px-4 py-5 text-sm text-muted-foreground"><CheckCircle2 className="text-success" size={19} /><span className="flex-1">You’re caught up. Browse the deck whenever you want a new problem.</span><Button asChild size="sm" variant="outline"><Link href="/problems">Browse problems</Link></Button></div>}</section>
+      <section className="overflow-hidden rounded-lg border border-border bg-card"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3"><div><h2 className="text-sm font-semibold">Due reviews</h2><p className="mt-0.5 text-xs text-muted-foreground">Everything due today or overdue. FSRS prioritizes the queue.</p></div>{initialDue.length > 0 && <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">FSRS priority</span>}</div>{initialDue.length ? <div className="divide-y divide-border">{initialDue.map((problem) => <Link href={`/problems/${problem.id}`} className="group grid min-h-16 grid-cols-[2.75rem_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 transition-colors hover:bg-accent sm:grid-cols-[3.25rem_minmax(0,1fr)_5rem_5.5rem_1rem]" key={problem.id}><span className="font-mono text-xs text-muted-foreground">#{problem.leetcodeNumber}</span><span className="min-w-0"><span className="block truncate text-sm font-medium">{problem.title}</span><span className="mt-0.5 block truncate text-xs text-muted-foreground">{problem.primaryTopic ?? problem.topics[0] ?? "Problem"}{problem.latest_rating ? ` · last: ${problem.latest_rating === "again" ? "Forgot" : problem.latest_rating}` : ""}</span></span><span className="hidden sm:block"><DifficultyBadge difficulty={problem.difficulty} /></span><span className="hidden text-right sm:block"><span className="block text-xs font-medium text-destructive">{dueLabel(problem.card.due_at, timezone, todayKey)}</span><span className="mt-0.5 block font-mono text-[9px] text-muted-foreground">{problem.card.scheduled_days}d interval</span></span><ChevronRight size={15} className="text-muted-foreground transition-transform group-hover:translate-x-0.5" /></Link>)}</div> : <div className="flex min-h-32 flex-wrap items-center gap-3 px-4 py-5 text-sm text-muted-foreground"><CheckCircle2 className="text-success" size={19} /><span className="flex-1">You’re caught up. Browse the deck whenever you want a new problem.</span><Button asChild size="sm" variant="outline"><Link href="/problems">Browse problems</Link></Button></div>}</section>
 
-      <aside className="overflow-hidden rounded-lg border border-border bg-card"><div className="border-b border-border px-4 py-3"><h2 className="text-sm font-semibold">Coming up</h2><p className="mt-0.5 text-xs text-muted-foreground">Real FSRS review dates—never assigned new work.</p></div>{preview.length ? <div className="divide-y divide-border">{preview.map((problem) => <Link href={`/problems/${problem.id}`} className="flex min-h-16 items-center gap-3 px-4 py-3 hover:bg-accent" key={problem.id}><CalendarDays size={15} className="shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">#{problem.leetcodeNumber} {problem.title}</span><span className="mt-0.5 block text-xs text-muted-foreground">{formatRelativeDue(problem.card.due_at)}</span></span><ChevronRight size={14} className="text-muted-foreground" /></Link>)}</div> : <p className="px-4 py-6 text-sm text-muted-foreground">Future reviews appear after you record a first attempt.</p>}<Link href="/schedule" className="flex min-h-11 items-center justify-between border-t border-border px-4 text-xs font-medium text-link hover:bg-accent"><span>Open schedule</span><ArrowRight size={14} /></Link></aside>
+      <aside className="overflow-hidden rounded-lg border border-border bg-card"><div className="border-b border-border px-4 py-3"><h2 className="text-sm font-semibold">Coming up</h2><p className="mt-0.5 text-xs text-muted-foreground">Real FSRS review dates—never assigned new work.</p></div>{preview.length ? <div className="divide-y divide-border">{preview.map((problem) => <Link href={`/problems/${problem.id}`} className="flex min-h-16 items-center gap-3 px-4 py-3 hover:bg-accent" key={problem.id}><CalendarDays size={15} className="shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">#{problem.leetcodeNumber} {problem.title}</span><span className="mt-0.5 block text-xs text-muted-foreground">Scheduled · {formatDate(problem.card.due_at, timezone)}</span></span><ChevronRight size={14} className="text-muted-foreground" /></Link>)}</div> : <p className="px-4 py-6 text-sm text-muted-foreground">Future reviews appear after you record a first attempt.</p>}<Link href="/schedule" className="flex min-h-11 items-center justify-between border-t border-border px-4 text-xs font-medium text-link hover:bg-accent"><span>Open schedule</span><ArrowRight size={14} /></Link></aside>
     </div>
   </div>;
 }

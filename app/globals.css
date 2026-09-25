@@ -337,20 +337,6 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 .primary-button:hover { background:var(--primary-hover); }
 html[data-theme="dark"] .text-primary { color:var(--blue); }
 
-/* Small, dependency-free review workload chart. The horizontal overflow keeps
-   date labels readable on narrow phones instead of squeezing the bars. */
-.review-load-bars { min-height: 190px; display:flex; align-items:flex-end; gap:10px; }
-.review-load-column { min-width:42px; flex:1; display:flex; min-height:176px; flex-direction:column; align-items:center; justify-content:flex-end; }
-.review-load-bar { width:100%; min-height:2px; border-radius:5px 5px 2px 2px; background:var(--info); box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 24%,transparent); transition:height .18s ease,filter .18s ease; }
-.review-load-bar.today { background:var(--primary); }
-.review-load-bar:hover,.review-load-bar:focus-visible { filter:brightness(1.12); }
-@media (prefers-reduced-motion: reduce) { .review-load-bar { transition:none; } }
-
-@keyframes chart-rise {
-  from { opacity: .45; transform: scaleY(.14); }
-  to { opacity: 1; transform: scaleY(1); }
-}
-
 /* shadcn-inspired application finish: neutral surfaces, quiet borders, and
    semantic colors shared by legacy surfaces and Tailwind-based screens. */
 html,body { background:var(--background); color:var(--foreground); }
@@ -444,8 +430,6 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 .app-toast { color:var(--green); border-color:color-mix(in srgb,var(--green) 32%,var(--border)); background:var(--green-soft); }
 .rc-calendar .rc-calendar-review:not(.rdp-selected) button { box-shadow:inset 0 -2px 0 var(--orange); }
 .rc-calendar .rc-calendar-completed:not(.rdp-selected) button { color:var(--green); }
-.review-load-bar { background:var(--chart-future); box-shadow:none; }.review-load-bar.today { background:var(--chart-1); }
-
 html[data-theme="dark"] .text-primary { color:var(--primary); }
 html[data-theme="dark"] .auth-page,html[data-theme="dark"] .onboarding-page { background:var(--background); }
 html[data-theme="dark"] .caught-up-card,html[data-theme="dark"] .review-confirmation,html[data-theme="dark"] .review-finish { color:var(--green); border-color:color-mix(in srgb,var(--green) 30%,var(--border)); background:var(--green-soft); }

@@ -16,10 +16,10 @@ export const CATALOGS: Record<CatalogId, { name: string; description: string }> 
 };
 
 export const RATING_COPY: Record<ReviewRating, { label: string; detail: string; key: string }> = {
-  again: { label: "Forgot", detail: "Could not reconstruct it independently; study the approach before tomorrow’s retry.", key: "1" },
+  again: { label: "Forgot", detail: "Could not reconstruct independently, needed meaningful hints, or needed the solution.", key: "1" },
   hard: { label: "Hard", detail: "Recalled it without hints, but slowly or with substantial effort.", key: "2" },
   good: { label: "Good", detail: "Solved independently with reasonable effort.", key: "3" },
-  easy: { label: "Easy", detail: "The approach was immediately clear.", key: "4" },
+  easy: { label: "Easy", detail: "The approach and implementation were immediately clear.", key: "4" },
 };
 
 export const SCHEDULER_VERSION = "ts-fsrs@5.4.2 / retention=0.9 / max=365d / short-term=off";

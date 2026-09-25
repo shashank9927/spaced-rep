@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attentionProblems, isStrong, isWeak, progressSummary, queueOrder, reviewLoadForCards } from "@/lib/analytics";
+import { activityForWeeks, activitySummaryForDays, attentionProblems, isStrong, isWeak, progressSummary, queueOrder, recallOutcomesForWeeks, reviewLoadForCards } from "@/lib/analytics";
 import type { StudyCard } from "@/lib/analytics";
 import type { ReviewLogSummary } from "@/lib/types";
 
@@ -36,7 +36,7 @@ describe("study analytics", () => {
     expect(load.totalDueNext14Days).toBe(2);
     expect(load.days[0]).toMatchObject({ dateKey: "2026-09-24", dueCount: 1, isToday: true });
     expect(load.days[1]).toMatchObject({ dateKey: "2026-09-25", dueCount: 1 });
-    expect(load.peakDay?.dateKey).toBe("2026-09-24");
+    expect(load.peakDay?.dateKey).toBe("2026-09-25");
   });
 
   it("groups completed activity and due dates by the user's timezone", () => {
@@ -83,6 +83,46 @@ describe("study analytics", () => {
     ];
     const summary = progressSummary([card()], logs, "UTC", new Date("2026-09-24T12:00:00.000Z"), "2026-06-27");
     expect(summary.scheduledRecallSampleSize).toBe(1);
+  });
+
+  it("counts scheduled recalls separately from early reviews and counts active local study days", () => {
+    const logs: ReviewLogSummary[] = [
+      { id: "attempt", problem_id: card().id, rating: "good", reviewed_at: "2026-09-21T08:00:00.000Z", note: null, previous_due_at: null, next_due_at: "2026-09-22T08:00:00.000Z", scheduled_days: 1, event_kind: "first_attempt" },
+      { id: "scheduled", problem_id: card().id, rating: "hard", reviewed_at: "2026-09-23T08:00:00.000Z", note: null, previous_due_at: "2026-09-22T08:00:00.000Z", next_due_at: "2026-09-25T08:00:00.000Z", scheduled_days: 2, event_kind: "scheduled_review" },
+      { id: "early", problem_id: card().id, rating: "again", reviewed_at: "2026-09-24T08:00:00.000Z", note: null, previous_due_at: "2026-09-25T08:00:00.000Z", next_due_at: "2026-09-25T08:00:00.000Z", scheduled_days: 1, event_kind: "early_review" },
+    ];
+    const summary = progressSummary([card()], logs, "Europe/Berlin", new Date("2026-09-24T12:00:00.000Z"));
+    expect(summary).toMatchObject({ firstAttemptsThisWeek: 1, completedReviewsThisWeek: 1, earlyReviewsThisWeek: 1, activeStudyDaysThisWeek: 3, scheduledRecallSampleSize: 1, scheduledRecallRate: null });
+  });
+
+  it("builds a 12-week activity grid with local calendar days and excludes future cells from totals", () => {
+    const logs: ReviewLogSummary[] = [
+      { id: "past", problem_id: card().id, rating: "good", reviewed_at: "2026-09-23T23:30:00.000Z", note: null, previous_due_at: null, next_due_at: "2026-09-27T08:00:00.000Z", scheduled_days: 3, event_kind: "first_attempt" },
+    ];
+    const days = activityForWeeks(logs, "Europe/Berlin", new Date("2026-09-24T12:00:00.000Z"));
+    expect(days).toHaveLength(84);
+    expect(days[0]?.key).toBe("2026-07-06");
+    expect(days[0]?.isFuture).toBe(false);
+    expect(days.at(-1)?.key).toBe("2026-09-27");
+    expect(days.at(-1)?.isFuture).toBe(true);
+    expect(activitySummaryForDays(days)).toMatchObject({ activeDays: 1, totalEvents: 1, firstAttempts: 1 });
+  });
+
+  it("groups review outcomes by local Monday weeks and excludes early, first, future, and undone events", () => {
+    const common = { problem_id: card().id, note: null, previous_due_at: "2026-09-20T12:00:00.000Z", next_due_at: "2026-09-24T12:00:00.000Z", scheduled_days: 3 };
+    const logs: ReviewLogSummary[] = [
+      { ...common, id: "mon-local", rating: "hard", reviewed_at: "2026-09-20T22:30:00.000Z", event_kind: "scheduled_review" },
+      { ...common, id: "sun-local", rating: "again", reviewed_at: "2026-09-20T20:30:00.000Z", event_kind: "scheduled_review" },
+      { ...common, id: "early", rating: "good", reviewed_at: "2026-09-22T10:00:00.000Z", event_kind: "early_review" },
+      { ...common, id: "attempt", rating: "good", reviewed_at: "2026-09-22T10:00:00.000Z", event_kind: "first_attempt" },
+      { ...common, id: "undone", rating: "again", reviewed_at: "2026-09-22T10:00:00.000Z", event_kind: "scheduled_review", reversed_at: "2026-09-22T10:01:00.000Z" },
+      { ...common, id: "future", rating: "again", reviewed_at: "2026-09-25T10:00:00.000Z", event_kind: "scheduled_review" },
+    ];
+    const weeks = recallOutcomesForWeeks(logs, "Europe/Berlin", new Date("2026-09-24T12:00:00.000Z"));
+    expect(weeks).toHaveLength(12);
+    expect(weeks.at(-1)?.weekKey).toBe("2026-09-21");
+    expect(weeks.at(-1)).toMatchObject({ recalledCount: 1, forgotCount: 0, sampleSize: 1, isCurrentWeek: true });
+    expect(weeks.at(-2)).toMatchObject({ recalledCount: 0, forgotCount: 1, sampleSize: 1 });
   });
 
   it("prioritizes due cards ahead of recent hard cards in reinforcement", () => {

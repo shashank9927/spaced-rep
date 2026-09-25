@@ -5,9 +5,9 @@ import { ratingOptions } from "@/lib/scheduler";
 import { Suspense } from "react";
 
 async function ReviewContent() {
-  const queue = await getDueQueue();
-  const optionsByProblem = Object.fromEntries(queue.map((problem) => [problem.id, ratingOptions(problem.card)]));
-  return <ReviewClient initialQueue={queue} optionsByProblem={optionsByProblem} />;
+  const data = await getDueQueue();
+  const optionsByProblem = Object.fromEntries(data.problems.map((problem) => [problem.id, ratingOptions(problem.card)]));
+  return <ReviewClient initialQueue={data.problems} optionsByProblem={optionsByProblem} timezone={data.timezone} todayKey={data.todayKey} />;
 }
 
 export default function ReviewPage() { return <Suspense fallback={<RouteLoading variant="detail" />}><ReviewContent /></Suspense>; }

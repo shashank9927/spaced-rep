@@ -4,7 +4,7 @@ import { cache } from "react";
 import { connection } from "next/server";
 import { unstable_cache } from "next/cache";
 import { z } from "zod";
-import { activityForDays, attentionProblems, attentionReason, median, patternSignals, previousDateKey, progressSummary, queueOrder, reviewLoadForCards, weekStartKey, type StudyCard } from "@/lib/analytics";
+import { activityForWeeks, activitySummaryForDays, attentionProblems, attentionReason, median, patternSignals, previousDateKey, progressSummary, queueOrder, recallOutcomesForWeeks, reviewLoadForCards, weekStartKey, type StudyCard } from "@/lib/analytics";
 import { getProfile, type Profile } from "@/lib/auth";
 import { measure } from "@/lib/performance";
 import { buildScheduleAgenda, buildScheduleData, isDueOnOrBeforeLocalDay } from "@/lib/study-plan";
@@ -12,7 +12,7 @@ import { retrievability } from "@/lib/scheduler";
 import { createAdminClient, createClient } from "@/lib/supabase/server";
 import { leetcodeNumberFromSourceId, localDateKey } from "@/lib/utils";
 import { isAllowedExternalUrl } from "@/lib/security";
-import type { CatalogId, CatalogProblemSummary, DueProblem, FsrsCardState, ProblemDeckPayload, ProblemSummary, ProgressPayload, ReviewLogSummary, ReviewRating, ScheduleAgendaPayload, TodayPayload } from "@/lib/types";
+import type { CatalogId, CatalogProblemSummary, DueProblem, DueQueuePayload, FsrsCardState, ProblemDeckPayload, ProblemSummary, ProgressPayload, ReviewLogSummary, ReviewRating, ScheduleAgendaPayload, TodayPayload } from "@/lib/types";
 
 const CARD_SELECT = "due_at,stability,difficulty,elapsed_days,scheduled_days,learning_steps,reps,lapses,state,last_review_at,last_rating,version,first_attempted_at,problems(id,source_id,leetcode_number,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(position,is_primary,topics(name)))";
 const CARD_SUMMARY_SELECT = "problem_id,due_at,reps,last_review_at,last_rating,lapses,scheduled_days,first_attempted_at";
@@ -187,7 +187,8 @@ const catalogRows = cache(cachedCatalogRows);
 
 function todayStats(cards: StudyCard[], logs: ReviewLogSummary[], timezone: string, now: Date) {
   const start = weekStartKey(now, timezone);
-  const thisWeek = logs.filter((log) => !log.reversed_at && new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date(log.reviewed_at)) >= start);
+  const today = localDateKey(now, timezone);
+  const thisWeek = logs.filter((log) => { const key = localDateKey(new Date(log.reviewed_at), timezone); return !log.reversed_at && key >= start && key <= today; });
   return {
     firstAttemptsThisWeek: thisWeek.filter((log) => log.event_kind === "first_attempt").length,
     completedReviewsThisWeek: thisWeek.filter((log) => log.event_kind !== "first_attempt").length,
@@ -206,7 +207,7 @@ export async function getTodayData(): Promise<TodayPayload | null> {
   const cards = enrichCards(rows, [], now);
   const due = cards.filter((card) => isDueOnOrBeforeLocalDay(card.card.due_at, now, profile.timezone)).sort(queueOrder);
   const upcoming = cards.filter((card) => !isDueOnOrBeforeLocalDay(card.card.due_at, now, profile.timezone)).sort((a, b) => new Date(a.card.due_at).getTime() - new Date(b.card.due_at).getTime()).slice(0, 3);
-  return { timezone: profile.timezone, dueReviews: due, upcomingReviews: upcoming, ...todayStats(cards, logs, profile.timezone, now) };
+  return { timezone: profile.timezone, todayKey: localDateKey(now, profile.timezone), dueReviews: due, upcomingReviews: upcoming, ...todayStats(cards, logs, profile.timezone, now) };
 }
 
 export const getDashboardData = getTodayData;
@@ -225,15 +226,15 @@ export async function getCatalogProblems(catalogId: CatalogId): Promise<ProblemD
   });
   const now = new Date();
   const dueCount = profile ? problems.filter((problem) => problem.card && isDueOnOrBeforeLocalDay(problem.card.due_at, now, profile.timezone)).length : 0;
-  return { catalogId, problems, activeCount: problems.filter((problem) => problem.card).length, dueCount };
+  return { catalogId, todayKey: profile ? localDateKey(new Date(), profile.timezone) : localDateKey(new Date(), "UTC"), problems, activeCount: problems.filter((problem) => problem.card).length, dueCount };
 }
 
-export async function getDueQueue(): Promise<DueProblem[]> {
+export async function getDueQueue(): Promise<DueQueuePayload> {
   await connection();
   const [profile, rows] = await Promise.all([getProfile(), readStudyCards()]);
-  if (!profile) return [];
   const now = new Date();
-  return enrichCards(rows, [], now).filter((card) => isDueOnOrBeforeLocalDay(card.card.due_at, now, profile.timezone)).sort(queueOrder);
+  const timezone = profile?.timezone ?? "UTC";
+  return { timezone, todayKey: localDateKey(now, timezone), problems: profile ? enrichCards(rows, [], now).filter((card) => isDueOnOrBeforeLocalDay(card.card.due_at, now, timezone)).sort(queueOrder) : [] };
 }
 
 function localMonth(now: Date, timezone: string) {
@@ -313,8 +314,10 @@ export async function getProgressData(): Promise<ProgressPayload | null> {
   const cards = enrichCards(rows, [], now);
   let ninetyDayStart = localDateKey(now, profile.timezone);
   for (let day = 1; day < 90; day += 1) ninetyDayStart = previousDateKey(ninetyDayStart);
+  const activity = activityForWeeks(logs, profile.timezone, now, 12);
   return {
     timezone: profile.timezone,
+    todayKey: localDateKey(now, profile.timezone),
     hasCards: cards.length > 0,
     stats: progressSummary(cards, logs, profile.timezone, now, ninetyDayStart),
     attention: attentionProblems(cards, now, profile.timezone).slice(0, 8).map((card) => ({
@@ -328,7 +331,9 @@ export async function getProgressData(): Promise<ProgressPayload | null> {
       dueAt: card.card.due_at,
     })),
     patterns: patternSignals(cards, now, profile.timezone),
-    activity: activityForDays(logs, profile.timezone, now, 28),
+    activity,
+    activitySummary: activitySummaryForDays(activity),
+    recallOutcomes: recallOutcomesForWeeks(logs, profile.timezone, now, 12),
     reviewLoad: reviewLoadForCards(cards, logs, profile.timezone, now),
   };
 }

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { SCHEDULER_VERSION } from "@/lib/constants";
 import { getProfile, type Profile } from "@/lib/auth";
-import { cardStateForDatabase, ratingOptions, scheduleCard } from "@/lib/scheduler";
+import { cardStateForDatabase, ratingOptions, retrievability, scheduleCard } from "@/lib/scheduler";
 import { createAdminClient, createClient } from "@/lib/supabase/server";
 import { CATALOG_IDS, REVIEW_RATINGS, type CompleteUserProblemCard, type FsrsCardState, type RatingOption, type ReviewEventKind, type SubmitReviewInput } from "@/lib/types";
 import { safeErrorMessage, safeNoteSchema, timezoneSchema } from "@/lib/security";
@@ -13,10 +13,30 @@ import { getCatalogSearchIndex, getProblemHistoryPage } from "@/lib/queries";
 import { measure } from "@/lib/performance";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
+export type ActionErrorCode = "invalid_input" | "unauthorized" | "conflict" | "rate_limited" | "temporary_failure";
+export type ActionFailure = { ok: false; code: ActionErrorCode; error: string; retryable: boolean };
 export type ReviewActionResult = {
-  ok: true; reviewLogId: string; eventKind: ReviewEventKind; nextDue: string; reviewedAt: string;
+  ok: true; reviewLogId: string; eventKind: ReviewEventKind; nextDue: string; reviewedAt: string; retrievabilityNow: number;
   previousIntervalDays: number; newIntervalDays: number; note: string | null; card: CompleteUserProblemCard; ratingOptions: RatingOption[];
-} | { ok: false; error: string; conflict?: boolean };
+} | (ActionFailure & { conflict?: boolean });
+export type UndoReviewResult = { ok: true; message: string; problemId: string; card: CompleteUserProblemCard | null; retrievabilityNow: number | null; ratingOptions: RatingOption[] } | ActionFailure;
+
+function reviewFailure(code: ActionErrorCode, error: string): ActionFailure & { conflict?: boolean } {
+  return { ok: false, code, error, retryable: code === "conflict" || code === "rate_limited" || code === "temporary_failure", ...(code === "conflict" ? { conflict: true } : {}) };
+}
+
+function classifyActionError(error: unknown): ActionErrorCode {
+  if (error && typeof error === "object" && "code" in error) {
+    const code = String((error as { code?: unknown }).code);
+    if (code === "40001" || code === "23505") return "conflict";
+    if (code === "42501" || code === "PGRST301") return "unauthorized";
+    if (code === "429") return "rate_limited";
+  }
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (message.includes("sign in") || message.includes("not authorized")) return "unauthorized";
+  if (message.includes("rate limit") || message.includes("too many")) return "rate_limited";
+  return "temporary_failure";
+}
 
 async function activeProfile(): Promise<Profile> {
   const profile = await getProfile();
@@ -86,13 +106,16 @@ type ReviewRpcPayload = {
 };
 
 function reviewResultFromRpc(problemId: string, payload: ReviewRpcPayload): ReviewActionResult {
-  if (!payload.card) return { ok: false, error: "This review was changed before it could be reconciled. Refresh and try again." };
+  if (!payload.card) return reviewFailure("conflict", "This review was changed before it could be reconciled. Refresh and try again.");
+  const reviewedAt = payload.reviewed_at;
+  const state = dbCard(payload.card);
   return {
     ok: true,
     reviewLogId: payload.review_log_id,
     eventKind: payload.event_kind,
     nextDue: payload.next_due,
-    reviewedAt: payload.reviewed_at,
+    reviewedAt,
+    retrievabilityNow: retrievability(state, new Date()),
     previousIntervalDays: Number(payload.previous_interval_days ?? 0),
     newIntervalDays: Number(payload.new_interval_days ?? 0),
     note: payload.note ?? null,
@@ -103,12 +126,12 @@ function reviewResultFromRpc(problemId: string, payload: ReviewRpcPayload): Revi
 
 export async function submitReview(input: SubmitReviewInput): Promise<ReviewActionResult> {
   const parsed = reviewSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: "The review data is invalid. Refresh and try again." };
+  if (!parsed.success) return reviewFailure("invalid_input", "The review data is invalid. Refresh and try again.");
   try {
     const profile = await activeProfile();
     const supabase = await createClient();
     const { data: row, error: cardError } = await supabase.from("user_problem_cards").select("*").eq("user_id", profile.id).eq("problem_id", parsed.data.problemId).maybeSingle();
-    if (cardError) return { ok: false, error: safeErrorMessage(cardError, "We could not load this problem.") };
+    if (cardError) return reviewFailure("temporary_failure", safeErrorMessage(cardError, "We could not load this problem."));
     const now = new Date();
     const current = row ? dbCard(row) : null;
     const eventKind: ReviewEventKind = !row ? "first_attempt" : isDueOnOrBeforeLocalDay(row.due_at, now, profile.timezone) ? "scheduled_review" : "early_review";
@@ -124,27 +147,29 @@ export async function submitReview(input: SubmitReviewInput): Promise<ReviewActi
     }));
     if (error) {
       const conflict = error.code === "40001" || error.code === "23505";
-      return { ok: false, conflict, error: safeErrorMessage(error, conflict ? "This problem changed in another tab. Reload it, then rate again." : "We could not save this review. Please try again.") };
+      const code: ActionErrorCode = conflict ? "conflict" : classifyActionError(error);
+      return reviewFailure(code, safeErrorMessage(error, conflict ? "This problem changed in another tab. Reload it, then rate again." : "We could not save this review. Please try again."));
     }
     // The active review session reconciles from this response, so do not invalidate its
     // route (which would cause a needless second queue fetch).
     revalidatePath("/today"); revalidatePath("/schedule"); revalidatePath("/progress"); revalidatePath("/problems/" + parsed.data.problemId);
     return reviewResultFromRpc(parsed.data.problemId, data as ReviewRpcPayload);
-  } catch (error) { return { ok: false, error: safeErrorMessage(error, "We could not save this review. Please try again.") }; }
+  } catch (error) { return reviewFailure(classifyActionError(error), safeErrorMessage(error, "We could not save this review. Please try again.")); }
 }
 
-export async function undoReview(input: { reviewLogId: string; expectedVersion: number }): Promise<ActionResult & { problemId?: string; card?: CompleteUserProblemCard | null }> {
+export async function undoReview(input: { reviewLogId: string; expectedVersion: number }): Promise<UndoReviewResult> {
   const parsed = z.object({ reviewLogId: z.string().uuid(), expectedVersion: z.number().int().positive() }).safeParse(input);
-  if (!parsed.success) return { ok: false, error: "This review cannot be undone." };
+  if (!parsed.success) return reviewFailure("invalid_input", "This review cannot be undone.");
   try {
     const profile = await activeProfile();
     const { data, error } = await createAdminClient().rpc("undo_review_service", { p_user_id: profile.id, p_review_log_id: parsed.data.reviewLogId, p_expected_version: parsed.data.expectedVersion });
-    if (error) return { ok: false, error: safeErrorMessage(error, "This review can no longer be undone.") };
+    if (error) return reviewFailure(classifyActionError(error), safeErrorMessage(error, "This review can no longer be undone."));
     const problemId = data?.problem_id as string;
     const previous = data?.previous_card_state as Record<string, any> | null;
     revalidatePath("/today"); revalidatePath("/schedule"); revalidatePath("/progress"); revalidatePath("/problems/" + problemId);
-    return { ok: true, message: "Review undone.", problemId, card: previous ? cardResult(problemId, previous) : null };
-  } catch (error) { return { ok: false, error: safeErrorMessage(error, "This review can no longer be undone.") }; }
+    const card = previous ? cardResult(problemId, previous) : null;
+    return { ok: true, message: "Review undone.", problemId, card, retrievabilityNow: card ? retrievability(dbCard(previous!), new Date()) : null, ratingOptions: ratingOptions(card ? dbCard(previous!) : null) };
+  } catch (error) { return reviewFailure(classifyActionError(error), safeErrorMessage(error, "This review can no longer be undone.")); }
 }
 
 export async function saveSettings(input: { displayName: string; timezone: string; selectedCatalog: string }): Promise<ActionResult> {
