@@ -1,7 +1,10 @@
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { getProfile } from "@/lib/auth";
 
-export default async function Home() {
+async function HomeRedirect(): Promise<never> {
   const profile = await getProfile();
-  redirect(profile ? (profile.display_name ? "/today" : "/onboarding") : "/login");
+  return redirect(profile ? (profile.display_name ? "/today" : "/onboarding") : "/login");
 }
+
+export default function Home() { return <Suspense fallback={null}><HomeRedirect /></Suspense>; }

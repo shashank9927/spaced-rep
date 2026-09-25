@@ -1,6 +1,7 @@
 import "server-only";
 
 import { cache } from "react";
+import { connection } from "next/server";
 import { unstable_cache } from "next/cache";
 import { z } from "zod";
 import { activityForDays, attentionProblems, attentionReason, median, patternSignals, previousDateKey, progressSummary, queueOrder, reviewLoadForCards, weekStartKey, type StudyCard } from "@/lib/analytics";
@@ -196,6 +197,9 @@ function todayStats(cards: StudyCard[], logs: ReviewLogSummary[], timezone: stri
 }
 
 export async function getTodayData(): Promise<TodayPayload | null> {
+  // User cards/logs are deliberately uncached private data. Mark the boundary
+  // explicitly so Cache Components streams this work below the page fallback.
+  await connection();
   const now = new Date();
   const [profile, rows, logs] = await Promise.all([getProfile(), readStudyCards(), readAnalyticsLogs(new Date(now.getTime() - 8 * 86_400_000).toISOString())]);
   if (!profile) return null;
@@ -208,6 +212,7 @@ export async function getTodayData(): Promise<TodayPayload | null> {
 export const getDashboardData = getTodayData;
 
 export async function getCatalogProblems(catalogId: CatalogId): Promise<ProblemDeckPayload> {
+  await connection();
   const [rows, cardRows, profile] = await Promise.all([catalogRows(catalogId), readCardSummaries(), getProfile()]);
   const cards = new Map(cardRows.map((card: any) => [card.problem_id, card]));
   const problems = rows.flatMap((row: any) => {
@@ -224,6 +229,7 @@ export async function getCatalogProblems(catalogId: CatalogId): Promise<ProblemD
 }
 
 export async function getDueQueue(): Promise<DueProblem[]> {
+  await connection();
   const [profile, rows] = await Promise.all([getProfile(), readStudyCards()]);
   if (!profile) return [];
   const now = new Date();
@@ -238,10 +244,16 @@ function localMonth(now: Date, timezone: string) {
 }
 
 export async function getScheduleAgendaData(): Promise<ScheduleAgendaPayload | null> {
-  const [profile, rows] = await Promise.all([getProfile(), readStudyCards()]);
-  if (!profile) return null;
+  await connection();
   const now = new Date();
-  const logs = await readLogsInRange(new Date(now.getTime() - 2 * 86_400_000).toISOString(), new Date(now.getTime() + 16 * 86_400_000).toISOString());
+  // The event range is independent of profile data, so do not make the
+  // calendar wait for a profile/cards round-trip before beginning this read.
+  const [profile, rows, logs] = await Promise.all([
+    getProfile(),
+    readStudyCards(),
+    readLogsInRange(new Date(now.getTime() - 2 * 86_400_000).toISOString(), new Date(now.getTime() + 16 * 86_400_000).toISOString()),
+  ]);
+  if (!profile) return null;
   const data = buildScheduleAgenda({ cards: enrichCards(rows, [], now), logs, now, timezone: profile.timezone });
   const [year, numericMonth] = data.todayKey.slice(0, 7).split("-").map(Number);
   const max = new Date(Date.UTC(year, numericMonth + 11, 1));
@@ -249,15 +261,19 @@ export async function getScheduleAgendaData(): Promise<ScheduleAgendaPayload | n
 }
 
 export async function getScheduleData(month: string) {
-  const [profile, rows] = await Promise.all([getProfile(), readStudyCards()]);
-  if (!profile) return null;
+  await connection();
   const [year, calendarMonth] = month.split("-").map(Number);
   if (!Number.isInteger(year) || !Number.isInteger(calendarMonth) || calendarMonth < 1 || calendarMonth > 12) throw new Error("Invalid schedule month.");
   const first = new Date(Date.UTC(year, calendarMonth - 1, 1));
   const gridStart = new Date(first);
   gridStart.setUTCDate(gridStart.getUTCDate() - ((gridStart.getUTCDay() + 6) % 7));
-  const logs = await readLogsInRange(new Date(gridStart.getTime() - 86_400_000).toISOString(), new Date(gridStart.getTime() + 43 * 86_400_000).toISOString());
   const now = new Date();
+  const [profile, rows, logs] = await Promise.all([
+    getProfile(),
+    readStudyCards(),
+    readLogsInRange(new Date(gridStart.getTime() - 86_400_000).toISOString(), new Date(gridStart.getTime() + 43 * 86_400_000).toISOString()),
+  ]);
+  if (!profile) return null;
   return buildScheduleData({ month, cards: enrichCards(rows, [], now), logs, now, timezone: profile.timezone });
 }
 
@@ -269,6 +285,7 @@ export async function getProblemHistoryPage(problemId: string, before?: string) 
 }
 
 export async function getProblemDetail(problemId: string) {
+  await connection();
   if (!z.string().uuid().safeParse(problemId).success) return null;
   const supabase = await createClient();
   const [profile, problemResult, cardResult, logs] = await Promise.all([
@@ -289,6 +306,7 @@ export async function getProblemDetail(problemId: string) {
 }
 
 export async function getProgressData(): Promise<ProgressPayload | null> {
+  await connection();
   const now = new Date();
   const [profile, rows, logs] = await Promise.all([getProfile(), readStudyCards(), readAnalyticsLogs(new Date(now.getTime() - 92 * 86_400_000).toISOString())]);
   if (!profile) return null;
@@ -332,6 +350,7 @@ export async function getCatalogSearchIndex(catalogId: CatalogId) {
 }
 
 export async function getAdminData() {
+  await connection();
   const profile = await getProfile();
   if (!profile || profile.role !== "admin" || !profile.is_active) return { invites: [], snapshots: [] };
   const supabase = createAdminClient();

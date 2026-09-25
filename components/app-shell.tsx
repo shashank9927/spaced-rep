@@ -1,22 +1,14 @@
 "use client";
 
-import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import dynamic from "next/dynamic";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, BookOpenText, CalendarDays, Check, Code2, LayoutDashboard, LogOut, Moon, Search, Settings, ShieldCheck, Sun } from "lucide-react";
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { usePathname } from "next/navigation";
+import { BarChart3, BookOpenText, CalendarDays, Code2, LayoutDashboard, Moon, Sun } from "lucide-react";
+import { Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
 import { Toaster } from "sonner";
-import { getSearchIndex, setActiveCatalog } from "@/lib/actions";
-import { CATALOGS } from "@/lib/constants";
-import type { CatalogId } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import type { SearchIndexItem } from "@/components/search-command";
 import { PendingLink } from "@/components/pending-link";
-
-const SearchCommand = dynamic(() => import("@/components/search-command").then((module) => module.SearchCommand), { ssr: false });
 
 const navigation = [
   { href: "/today", label: "Today", icon: LayoutDashboard },
@@ -25,7 +17,6 @@ const navigation = [
   { href: "/progress", label: "Progress", icon: BarChart3 },
 ];
 
-type ShellProfile = { display_name: string; email: string; role: string; selected_catalog: CatalogId };
 type Theme = "light" | "dark";
 
 function ThemeButton({ theme, onToggle }: { theme: Theme; onToggle: () => void }) {
@@ -33,39 +24,54 @@ function ThemeButton({ theme, onToggle }: { theme: Theme; onToggle: () => void }
   return <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon-sm" type="button" onClick={onToggle} aria-label={`Switch to ${next} mode`}>{theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}</Button></TooltipTrigger><TooltipContent>Switch to {next} mode</TooltipContent></Tooltip>;
 }
 
-function UserMenu({ profile, theme, onToggle }: { profile: ShellProfile; theme: Theme; onToggle: () => void }) {
-  const initials = profile.display_name.slice(0, 2).toUpperCase();
-  return <DropdownMenu.Root><DropdownMenu.Trigger asChild><button className="grid size-8 shrink-0 place-items-center rounded-md border border-border bg-secondary text-xs font-semibold text-secondary-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring" aria-label="Open account menu">{initials}</button></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content align="end" sideOffset={9} className="z-50 min-w-60 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-2xl"><div className="px-3 py-2"><p className="truncate text-sm font-medium">{profile.display_name}</p><p className="truncate text-xs text-muted-foreground">{profile.email}</p></div><DropdownMenu.Separator className="my-1 h-px bg-border" /><DropdownMenu.Item asChild><Link className="flex min-h-10 items-center gap-2 rounded-md px-3 text-sm outline-none hover:bg-accent" href="/settings"><Settings size={16} /> Settings</Link></DropdownMenu.Item>{profile.role === "admin" && <DropdownMenu.Item asChild><Link className="flex min-h-10 items-center gap-2 rounded-md px-3 text-sm outline-none hover:bg-accent" href="/admin"><ShieldCheck size={16} /> Admin</Link></DropdownMenu.Item>}<DropdownMenu.Item onSelect={(event) => { event.preventDefault(); onToggle(); }} className="flex min-h-10 cursor-pointer items-center gap-2 rounded-md px-3 text-sm outline-none hover:bg-accent">{theme === "dark" ? <Sun size={16} /> : <Moon size={16} />} Use {theme === "dark" ? "light" : "dark"} mode</DropdownMenu.Item><DropdownMenu.Separator className="my-1 h-px bg-border" /><DropdownMenu.Item asChild><form action="/auth/signout" method="post"><button type="submit" className="flex min-h-10 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-destructive outline-none hover:bg-accent"><LogOut size={16} /> Sign out</button></form></DropdownMenu.Item></DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root>;
-}
-
-function CatalogMenu({ value, onChange, pending }: { value: CatalogId; onChange: (value: CatalogId) => void; pending: boolean }) {
-  return <DropdownMenu.Root><DropdownMenu.Trigger asChild><button type="button" disabled={pending} className="hidden min-h-8 items-center gap-2 rounded-md border border-border bg-card px-2.5 text-xs font-medium text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 sm:flex"><span className="size-1.5 rounded-full bg-cyan-500" />{CATALOGS[value].name.replace("NeetCode ", "NC ")}</button></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content align="end" sideOffset={9} className="z-50 min-w-44 rounded-lg border border-border bg-popover p-1 shadow-xl">{(Object.keys(CATALOGS) as CatalogId[]).map((id) => <DropdownMenu.Item key={id} onSelect={() => onChange(id)} className="flex min-h-9 cursor-pointer items-center justify-between rounded-md px-3 text-sm outline-none hover:bg-accent"><span>{CATALOGS[id].name}</span>{id === value && <Check size={14} className="text-primary" />}</DropdownMenu.Item>)}</DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root>;
-}
-
-export function AppShell({ children, profile }: { children: React.ReactNode; profile: ShellProfile }) {
+function NavigationLinks({ mobile = false }: { mobile?: boolean }) {
   const pathname = usePathname();
-  const router = useRouter();
-  const [theme, setTheme] = useState<Theme>("dark");
-  const [catalog, setCatalog] = useState(profile.selected_catalog);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchMounted, setSearchMounted] = useState(false);
-  const [searchIndex, setSearchIndex] = useState<SearchIndexItem[] | null>(null);
-  const [pending, startTransition] = useTransition();
+  return <>{navigation.map(({ href, label, icon: Icon }) => {
+    const active = pathname === href || pathname.startsWith(`${href}/`);
+    const classes = mobile
+      ? cn("grid min-h-12 place-items-center content-center gap-0.5 rounded-lg text-[10px] font-medium text-muted-foreground", active && "bg-accent text-accent-foreground")
+      : cn("flex min-h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:text-foreground", active && "bg-secondary text-foreground shadow-sm");
+    return <PendingLink prefetch className={classes} href={href} key={href}><Icon size={mobile ? 17 : 14} />{mobile ? <span>{label}</span> : label}</PendingLink>;
+  })}</>;
+}
 
-  useEffect(() => { const stored = window.localStorage.getItem("recallcode-theme"); const value = stored === "dark" || stored === "light" ? stored : "dark"; document.documentElement.dataset.theme = value; const timer = window.setTimeout(() => setTheme(value), 0); return () => window.clearTimeout(timer); }, []);
-  useEffect(() => { const syncCatalog = (event: Event) => { const value = (event as CustomEvent<string>).detail; if (typeof value === "string" && value in CATALOGS) setCatalog(value as CatalogId); setSearchIndex(null); }; window.addEventListener("recallcode:catalog-changed", syncCatalog); return () => window.removeEventListener("recallcode:catalog-changed", syncCatalog); }, []);
-  const toggleTheme = useCallback(() => setTheme((value) => { const next = value === "dark" ? "light" : "dark"; document.documentElement.dataset.theme = next; window.localStorage.setItem("recallcode-theme", next); return next; }), []);
-  const openSearch = useCallback(() => { setSearchMounted(true); setSearchOpen(true); if (!searchIndex) startTransition(async () => setSearchIndex(await getSearchIndex())); }, [searchIndex]);
-  const switchCatalog = useCallback((value: CatalogId) => { if (value === catalog) return; const previous = catalog; setCatalog(value); startTransition(async () => { const result = await setActiveCatalog(value); if (!result.ok) { setCatalog(previous); return; } setSearchIndex(null); window.dispatchEvent(new CustomEvent("recallcode:catalog-changed", { detail: value })); if (pathname === "/problems" || pathname.startsWith("/problems/")) router.refresh(); }); }, [catalog, pathname, router]);
-  useEffect(() => { const keydown = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); openSearch(); } }; window.addEventListener("keydown", keydown); return () => window.removeEventListener("keydown", keydown); }, [openSearch]);
+function NavigationFallback({ mobile = false }: { mobile?: boolean }) {
+  return <>{navigation.map(({ href, label, icon: Icon }) => {
+    const classes = mobile
+      ? "grid min-h-12 place-items-center content-center gap-0.5 rounded-lg text-[10px] font-medium text-muted-foreground"
+      : "flex min-h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground";
+    return <Link prefetch href={href} className={classes} key={href}><Icon size={mobile ? 17 : 14} />{mobile ? <span>{label}</span> : label}</Link>;
+  })}</>;
+}
+
+/** The frame has no private data dependency; profile controls stream into it. */
+export function AppShell({ children, controls, problem }: { children: ReactNode; controls: ReactNode; problem?: ReactNode }) {
+  const [theme, setTheme] = useState<Theme>("dark");
+  useEffect(() => {
+    const stored = window.localStorage.getItem("recallcode-theme");
+    const value = stored === "dark" || stored === "light" ? stored : "dark";
+    document.documentElement.dataset.theme = value;
+    const timer = window.setTimeout(() => setTheme(value), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+  const toggleTheme = useCallback(() => setTheme((value) => {
+    const next = value === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    window.localStorage.setItem("recallcode-theme", next);
+    return next;
+  }), []);
 
   return <TooltipProvider delayDuration={250}><div className="min-h-dvh bg-background text-foreground">
-    <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur-xl"><div className="mx-auto flex h-15 w-full max-w-[1440px] items-center gap-3 px-4 sm:px-6 lg:px-8"><Link href="/today" className="flex shrink-0 items-center gap-2.5 font-semibold tracking-[-.035em]"><span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground shadow-[0_0_0_1px_color-mix(in_srgb,var(--primary)_65%,transparent)]"><Code2 size={17} strokeWidth={2.4} /></span><span className="hidden text-[15px] sm:inline">RecallCode</span></Link><nav className="ml-2 hidden items-center gap-0.5 rounded-lg border border-border bg-card/60 p-1 md:flex" aria-label="Main navigation">{navigation.map(({ href, label, icon: Icon }) => { const active = pathname === href || pathname.startsWith(`${href}/`); return <PendingLink className={cn("flex min-h-8 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:text-foreground", active && "bg-secondary text-foreground shadow-sm")} href={href} key={href}><Icon size={14} />{label}</PendingLink>; })}</nav><div className="ml-auto flex min-w-0 items-center gap-1.5"><CatalogMenu value={catalog} onChange={switchCatalog} pending={pending} /><button type="button" onClick={openSearch} className="flex min-h-9 w-9 items-center gap-2 rounded-md border border-border bg-card px-2.5 text-left text-xs text-muted-foreground transition-colors duration-150 hover:border-primary/40 hover:bg-accent hover:text-foreground sm:w-48 lg:w-64"><Search size={14} className="shrink-0" /><span className="hidden min-w-0 flex-1 truncate sm:block">Search problem deck…</span><kbd className="hidden rounded bg-muted px-1.5 py-0.5 font-mono text-[9px] lg:block">⌘K</kbd></button><ThemeButton theme={theme} onToggle={toggleTheme} /><UserMenu profile={profile} theme={theme} onToggle={toggleTheme} /></div></div></header>
+    <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur-xl"><div className="mx-auto flex h-15 w-full max-w-[1440px] items-center gap-3 px-4 sm:px-6 lg:px-8"><Link href="/today" className="flex shrink-0 items-center gap-2.5 font-semibold tracking-[-.035em]"><span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground shadow-[0_0_0_1px_color-mix(in_srgb,var(--primary)_65%,transparent)]"><Code2 size={17} strokeWidth={2.4} /></span><span className="hidden text-[15px] sm:inline">RecallCode</span></Link><nav className="ml-2 hidden items-center gap-0.5 rounded-lg border border-border bg-card/60 p-1 md:flex" aria-label="Main navigation"><Suspense fallback={<NavigationFallback />}><NavigationLinks /></Suspense></nav><div className="ml-auto flex min-w-0 items-center gap-1.5">{controls}<ThemeButton theme={theme} onToggle={toggleTheme} /></div></div></header>
     <main className="mx-auto w-full max-w-[1440px] px-4 py-7 pb-24 sm:px-6 md:py-9 md:pb-12 lg:px-8">{children}</main>
-    <nav className="fixed inset-x-2 bottom-[max(.5rem,env(safe-area-inset-bottom))] z-30 grid grid-cols-4 rounded-xl border border-border bg-card/94 p-1 shadow-2xl backdrop-blur-xl md:hidden" aria-label="Main navigation">{navigation.map(({ href, label, icon: Icon }) => { const active = pathname === href || pathname.startsWith(`${href}/`); return <PendingLink className={cn("grid min-h-12 place-items-center content-center gap-0.5 rounded-lg text-[10px] font-medium text-muted-foreground", active && "bg-accent text-accent-foreground")} href={href} key={href}><Icon size={17} /><span>{label}</span></PendingLink>; })}</nav>
-    {searchMounted && <SearchCommand open={searchOpen} onOpenChange={setSearchOpen} index={searchIndex} loading={pending} catalogName={CATALOGS[catalog].name} />}
+    <nav className="fixed inset-x-2 bottom-[max(.5rem,env(safe-area-inset-bottom))] z-30 grid grid-cols-4 rounded-xl border border-border bg-card/94 p-1 shadow-2xl backdrop-blur-xl md:hidden" aria-label="Main navigation"><Suspense fallback={<NavigationFallback mobile />}><NavigationLinks mobile /></Suspense></nav>
+    {problem}
     <Toaster theme={theme} position="bottom-right" richColors closeButton />
   </div></TooltipProvider>;
 }
 
-export function EmptyState({ title, body, action }: { title: string; body: string; action?: React.ReactNode }) { return <div className="rounded-lg border border-dashed border-border bg-card px-6 py-12 text-center"><Code2 className="mx-auto mb-3 text-muted-foreground" size={26} /><h2 className="text-base font-semibold">{title}</h2><p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">{body}</p>{action && <div className="mt-4">{action}</div>}</div>; }
+export function ShellControlsSkeleton() {
+  return <div aria-label="Loading account controls" className="flex items-center gap-1.5"><span className="hidden h-8 w-18 animate-pulse rounded-md bg-muted sm:block" /><span className="h-9 w-9 animate-pulse rounded-md bg-muted sm:w-48 lg:w-64" /><span className="size-8 animate-pulse rounded-md bg-muted" /></div>;
+}
+
+export function EmptyState({ title, body, action }: { title: string; body: string; action?: ReactNode }) { return <div className="rounded-lg border border-dashed border-border bg-card px-6 py-12 text-center"><Code2 className="mx-auto mb-3 text-muted-foreground" size={26} /><h2 className="text-base font-semibold">{title}</h2><p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">{body}</p>{action && <div className="mt-4">{action}</div>}</div>; }

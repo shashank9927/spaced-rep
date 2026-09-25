@@ -1,6 +1,7 @@
 import "server-only";
 
 import { redirect } from "next/navigation";
+import { cacheLife } from "next/cache";
 import { cache } from "react";
 import type { User } from "@supabase/supabase-js";
 import { displayNameFromEmail } from "@/lib/utils";
@@ -18,15 +19,23 @@ export interface Profile {
   is_active: boolean;
 }
 
-export const getSessionClaims = cache(async () => {
+async function readSessionClaims() {
+  "use cache: private";
+  // This result is kept only in the signed-in browser's router cache. It is
+  // never shared between members or persisted in a server data cache.
+  cacheLife({ stale: 30 });
   const supabase = await createClient();
   const result = await measure("auth.claims", () => supabase.auth.getClaims());
   const claims = result.data?.claims;
   if (result.error || !claims?.sub) return null;
   return claims;
-});
+}
 
-export const getProfile = cache(async (): Promise<Profile | null> => {
+export const getSessionClaims = cache(readSessionClaims);
+
+async function readProfile(): Promise<Profile | null> {
+  "use cache: private";
+  cacheLife({ stale: 30 });
   const claims = await getSessionClaims();
   if (!claims?.sub) return null;
   const supabase = await createClient();
@@ -35,7 +44,9 @@ export const getProfile = cache(async (): Promise<Profile | null> => {
     .eq("id", claims.sub)
     .maybeSingle());
   return data as Profile | null;
-});
+}
+
+export const getProfile = cache(readProfile);
 
 export async function requireProfile(options?: { onboarding?: boolean; admin?: boolean }): Promise<Profile> {
   const profile = await getProfile();

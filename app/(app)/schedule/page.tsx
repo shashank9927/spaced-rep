@@ -2,12 +2,14 @@ import { ScheduleClient } from "@/components/schedule-client";
 import { getScheduleAgendaData, getScheduleData } from "@/lib/queries";
 import { localDateKey } from "@/lib/utils";
 import { requireProfile } from "@/lib/auth";
+import { RouteLoading } from "@/components/route-loading";
+import { Suspense } from "react";
 
 function currentMonth(timezone: string) {
   return localDateKey(new Date(), timezone).slice(0, 7);
 }
 
-export default async function SchedulePage({ searchParams }: { searchParams: Promise<{ month?: string; view?: string }> }) {
+async function ScheduleContent({ searchParams }: { searchParams: Promise<{ month?: string; view?: string }> }) {
   const [profile, params] = await Promise.all([requireProfile(), searchParams]);
   const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(params.month ?? "") ? params.month! : currentMonth(profile.timezone);
   const maxMonth = (() => { const [year, numericMonth] = currentMonth(profile.timezone).split("-").map(Number); const value = new Date(Date.UTC(year, numericMonth + 11, 1)); return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, "0")}`; })();
@@ -19,3 +21,5 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
   if (!agendaData) return null;
   return <ScheduleClient key={monthData?.month ?? "agenda"} agendaData={agendaData} monthData={monthData} />;
 }
+
+export default function SchedulePage({ searchParams }: { searchParams: Promise<{ month?: string; view?: string }> }) { return <Suspense fallback={<RouteLoading />}><ScheduleContent searchParams={searchParams} /></Suspense>; }

@@ -1,7 +1,7 @@
-import { AppShell } from "@/components/app-shell";
-import { requireProfile } from "@/lib/auth";
+import { Suspense } from "react";
+import { AppShell, ShellControlsSkeleton } from "@/components/app-shell";
+import { AppShellAccount } from "@/components/app-shell-account";
 
-export default async function AuthenticatedLayout({ children, problem }: { children: React.ReactNode; problem?: React.ReactNode }) {
-  const profile = await requireProfile();
-  return <AppShell profile={{ display_name: profile.display_name!, email: profile.email, role: profile.role, selected_catalog: profile.selected_catalog }}>{children}{problem}</AppShell>;
+export default function AuthenticatedLayout({ children, problem }: { children: React.ReactNode; problem?: React.ReactNode }) {
+  return <AppShell controls={<Suspense fallback={<ShellControlsSkeleton />}><AppShellAccount /></Suspense>} problem={problem}>{children}</AppShell>;
 }

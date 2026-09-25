@@ -10,6 +10,7 @@ import { CATALOG_IDS, REVIEW_RATINGS, type CompleteUserProblemCard, type FsrsCar
 import { safeErrorMessage, safeNoteSchema, timezoneSchema } from "@/lib/security";
 import { isDueOnOrBeforeLocalDay } from "@/lib/study-plan";
 import { getCatalogSearchIndex, getProblemHistoryPage } from "@/lib/queries";
+import { measure } from "@/lib/performance";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
 export type ReviewActionResult = {
@@ -73,34 +74,31 @@ function cardSnapshot(row: Record<string, any> | null) {
   return { first_attempted_at: row.first_attempted_at, due_at: row.due_at, stability: Number(row.stability), difficulty: Number(row.difficulty), elapsed_days: row.elapsed_days, scheduled_days: row.scheduled_days, learning_steps: row.learning_steps, reps: row.reps, lapses: row.lapses, state: row.state, last_review_at: row.last_review_at, last_rating: row.last_rating, version: row.version };
 }
 
-function normalizedNote(note: string | null | undefined) { return (note ?? "").trim(); }
+type ReviewRpcPayload = {
+  review_log_id: string;
+  event_kind: ReviewEventKind;
+  next_due: string;
+  reviewed_at: string;
+  previous_interval_days: number;
+  new_interval_days: number;
+  note: string | null;
+  card: Record<string, any> | null;
+};
 
-async function existingResult(profile: Profile, input: z.infer<typeof reviewSchema>): Promise<ReviewActionResult | null> {
-  const supabase = await createClient();
-  const { data: log, error: logError } = await supabase.from("review_logs").select("id,problem_id,rating,event_kind,next_due_at,scheduled_days,note,reviewed_at,previous_card_state,result_card_state,result_version").eq("user_id", profile.id).eq("request_id", input.requestId).maybeSingle();
-  if (logError) throw logError;
-  if (!log) return null;
-  if (log.problem_id !== input.problemId || log.rating !== input.rating || normalizedNote(log.note) !== normalizedNote(input.note)) {
-    return { ok: false, conflict: true, error: "This request ID was already used with different review details." };
-  }
-  const resultState = log.result_card_state as Record<string, any> | null;
-  if (resultState) {
-    return {
-      ok: true,
-      reviewLogId: log.id,
-      eventKind: (log.event_kind ?? "scheduled_review") as ReviewEventKind,
-      nextDue: log.next_due_at,
-      reviewedAt: log.reviewed_at,
-      previousIntervalDays: Number((log.previous_card_state as Record<string, any> | null)?.scheduled_days ?? 0),
-      newIntervalDays: log.scheduled_days,
-      note: log.note ?? null,
-      card: cardResult(input.problemId, resultState),
-      ratingOptions: ratingOptions(dbCard(resultState)),
-    };
-  }
-  const { data: card, error: cardError } = await supabase.from("user_problem_cards").select("*").eq("user_id", profile.id).eq("problem_id", input.problemId).maybeSingle();
-  if (cardError || !card) return { ok: false, error: "The saved review could not be reconciled. Please refresh." };
-  return { ok: true, reviewLogId: log.id, eventKind: (log.event_kind ?? "scheduled_review") as ReviewEventKind, nextDue: log.next_due_at, reviewedAt: log.reviewed_at, previousIntervalDays: 0, newIntervalDays: log.scheduled_days, note: log.note ?? null, card: cardResult(input.problemId, card), ratingOptions: ratingOptions(dbCard(card)) };
+function reviewResultFromRpc(problemId: string, payload: ReviewRpcPayload): ReviewActionResult {
+  if (!payload.card) return { ok: false, error: "This review was changed before it could be reconciled. Refresh and try again." };
+  return {
+    ok: true,
+    reviewLogId: payload.review_log_id,
+    eventKind: payload.event_kind,
+    nextDue: payload.next_due,
+    reviewedAt: payload.reviewed_at,
+    previousIntervalDays: Number(payload.previous_interval_days ?? 0),
+    newIntervalDays: Number(payload.new_interval_days ?? 0),
+    note: payload.note ?? null,
+    card: cardResult(problemId, payload.card),
+    ratingOptions: ratingOptions(dbCard(payload.card)),
+  };
 }
 
 export async function submitReview(input: SubmitReviewInput): Promise<ReviewActionResult> {
@@ -108,8 +106,6 @@ export async function submitReview(input: SubmitReviewInput): Promise<ReviewActi
   if (!parsed.success) return { ok: false, error: "The review data is invalid. Refresh and try again." };
   try {
     const profile = await activeProfile();
-    const duplicate = await existingResult(profile, parsed.data);
-    if (duplicate) return duplicate;
     const supabase = await createClient();
     const { data: row, error: cardError } = await supabase.from("user_problem_cards").select("*").eq("user_id", profile.id).eq("problem_id", parsed.data.problemId).maybeSingle();
     if (cardError) return { ok: false, error: safeErrorMessage(cardError, "We could not load this problem.") };
@@ -120,9 +116,12 @@ export async function submitReview(input: SubmitReviewInput): Promise<ReviewActi
     const version = (row?.version ?? 0) + 1;
     const firstAttemptedAt = row?.first_attempted_at ?? now.toISOString();
     const nextSnapshot = { first_attempted_at: firstAttemptedAt, due_at: next.due_at, stability: next.stability, difficulty: next.difficulty, elapsed_days: next.elapsed_days, scheduled_days: next.scheduled_days, learning_steps: next.learning_steps, reps: next.reps, lapses: next.lapses, state: next.state, last_review_at: next.last_review_at, last_rating: parsed.data.rating, version };
-    const { error } = await createAdminClient().rpc("submit_review_service", {
+    // The service RPC checks idempotency before locking a card, then returns
+    // the exact saved result. That makes safe network retries one round-trip
+    // cheaper and removes the old post-save reconciliation query.
+    const { data, error } = await measure("review.rpc", () => createAdminClient().rpc("submit_review_result_service", {
       p_user_id: profile.id, p_problem_id: parsed.data.problemId, p_request_id: parsed.data.requestId, p_rating: parsed.data.rating, p_reviewed_at: now.toISOString(), p_note: parsed.data.note ?? null, p_scheduler_version: SCHEDULER_VERSION, p_event_kind: eventKind, p_previous_due_at: row?.due_at ?? null, p_next_due_at: next.due_at, p_stability: next.stability, p_difficulty: next.difficulty, p_elapsed_days: next.elapsed_days, p_scheduled_days: next.scheduled_days, p_learning_steps: next.learning_steps, p_reps: next.reps, p_lapses: next.lapses, p_state: next.state, p_last_review_at: next.last_review_at, p_first_attempted_at: firstAttemptedAt, p_expected_version: row?.version ?? 0, p_previous_card_state: cardSnapshot(row), p_result_card_state: nextSnapshot, p_result_version: version,
-    });
+    }));
     if (error) {
       const conflict = error.code === "40001" || error.code === "23505";
       return { ok: false, conflict, error: safeErrorMessage(error, conflict ? "This problem changed in another tab. Reload it, then rate again." : "We could not save this review. Please try again.") };
@@ -130,9 +129,7 @@ export async function submitReview(input: SubmitReviewInput): Promise<ReviewActi
     // The active review session reconciles from this response, so do not invalidate its
     // route (which would cause a needless second queue fetch).
     revalidatePath("/today"); revalidatePath("/schedule"); revalidatePath("/progress"); revalidatePath("/problems/" + parsed.data.problemId);
-    const saved = await existingResult(profile, parsed.data);
-    if (!saved) return { ok: false, error: "We saved the review but could not reconcile it. Please refresh." };
-    return saved;
+    return reviewResultFromRpc(parsed.data.problemId, data as ReviewRpcPayload);
   } catch (error) { return { ok: false, error: safeErrorMessage(error, "We could not save this review. Please try again.") }; }
 }
 

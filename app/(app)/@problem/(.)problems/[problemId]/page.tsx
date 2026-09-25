@@ -4,10 +4,13 @@ import { ProblemDetailSheet } from "@/components/problem-detail-sheet";
 import { requireProfile } from "@/lib/auth";
 import { getProblemDetail } from "@/lib/queries";
 import { ratingOptions } from "@/lib/scheduler";
+import { Suspense } from "react";
 
-export default async function ProblemPanel({ params }: { params: Promise<{ problemId: string }> }) {
+async function ProblemPanelContent({ params }: { params: Promise<{ problemId: string }> }) {
   const { problemId } = await params;
   const [profile, detail] = await Promise.all([requireProfile(), getProblemDetail(problemId)]);
   if (!detail) notFound();
   return <ProblemDetailSheet title={detail.problem.title}><ProblemDetailClient panel problem={detail.problem} card={detail.card} logs={detail.logs} nextCursor={detail.nextCursor} timezone={profile.timezone} options={ratingOptions(detail.card?.card ?? null)} /></ProblemDetailSheet>;
 }
+
+export default function ProblemPanel({ params }: { params: Promise<{ problemId: string }> }) { return <Suspense fallback={null}><ProblemPanelContent params={params} /></Suspense>; }
