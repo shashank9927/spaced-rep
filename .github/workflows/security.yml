@@ -11,6 +11,15 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # The production build validates that public Supabase settings exist even
+    # though it does not contact Supabase while it renders private routes.
+    # Keep CI self-contained: these are inert build-time placeholders, not
+    # deployment credentials.
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: build-placeholder-key
+      SUPABASE_SERVICE_ROLE_KEY: build-placeholder-key
+      NEXT_PUBLIC_SITE_URL: http://localhost:3000
     steps:
       - uses: actions/checkout@v4
         with:
