@@ -21,6 +21,10 @@ export default async function globalSetup() {
   }
 
   const admin = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
+  // This row is created by the Admin browser test. Remove it first so a prior
+  // local run cannot affect the initial invitation list.
+  const { error: friendCleanupError } = await admin.from("allowed_emails").delete().eq("email", "friend@recallcode.test");
+  if (friendCleanupError) throw friendCleanupError;
   const existing = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
   if (existing.error) throw existing.error;
   const testEmails = new Set(identities.map((identity) => identity.email));

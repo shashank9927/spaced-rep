@@ -2,9 +2,11 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { useEffect, useRef } from "react";
 import { Activity, ArrowRight, BookOpenCheck, CalendarCheck2, Gauge, ShieldAlert } from "lucide-react";
 import type { getProgressData } from "@/lib/queries";
 import type { ActivityDay } from "@/lib/types";
+import { activityLevel } from "@/lib/analytics";
 import { formatDate, localDateKey } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -31,7 +33,7 @@ export function ProgressDashboard({ data }: { data: ProgressData }) {
 
     <ProgressCharts data={data} />
 
-    <ActivityHeatmap days={data.activity} activeDays={data.activitySummary.activeDays} totalEvents={data.activitySummary.totalEvents} />
+    <ActivityHeatmap days={data.activity} activeDays={data.activitySummary.activeDays} totalEvents={data.activitySummary.totalEvents} todayKey={data.todayKey} />
 
     <div className="mt-5 grid items-start gap-5 lg:grid-cols-[1.15fr_.85fr]">
       <section className="overflow-hidden rounded-lg border border-border bg-card"><div className="flex items-center justify-between border-b border-border px-4 py-3"><div><h2 className="flex items-center gap-2 text-sm font-semibold"><ShieldAlert size={15} /> Needs reinforcement</h2><p className="mt-0.5 text-xs text-muted-foreground">A review queue signal, not extra work. Follow the FSRS due date.</p></div><Link href="/problems" className="text-xs font-semibold text-link hover:underline">Browse problems</Link></div>{data.attention.length ? <div className="divide-y divide-border">{data.attention.map((problem) => { const dueLabel = problem.reason === "due" ? (localDateKey(new Date(problem.dueAt), data.timezone) < data.todayKey ? "Overdue" : "Due today") : reasonLabel(problem.reason); return <Link key={problem.id} href={`/problems/${problem.id}`} className="grid min-h-16 grid-cols-[3rem_minmax(0,1fr)_auto_1rem] items-center gap-3 px-4 py-3 hover:bg-accent"><span className="font-mono text-xs text-muted-foreground">#{problem.leetcodeNumber}</span><span className="min-w-0"><strong className="block truncate text-sm font-medium">{problem.title}</strong><small className="block truncate text-xs text-muted-foreground">{problem.primaryTopic ?? problem.topics[0] ?? "Problem"} · {dueLabel}</small></span><span className="text-right"><span className="block font-mono text-[10px] text-muted-foreground">{problem.scheduledDays}d spacing</span><span className="block text-[10px] text-muted-foreground">{formatDate(problem.dueAt, data.timezone)}</span></span><ArrowRight size={14} className="text-muted-foreground" /></Link>; })}</div> : <p className="px-4 py-8 text-sm text-muted-foreground">No cards need special attention right now.</p>}</section>
@@ -44,25 +46,64 @@ function Metric({ label, value, detail, icon }: { label: string; value: string; 
   return <div className="border-b border-border p-4 last:border-0 sm:border-b-0 sm:border-r sm:last:border-r-0"><span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{icon}{label}</span><div className="mt-2 text-2xl font-semibold leading-none">{value}</div><span className="mt-2 block text-xs leading-5 text-muted-foreground">{detail}</span></div>;
 }
 
-function ActivityHeatmap({ days, activeDays, totalEvents }: { days: ActivityDay[]; activeDays: number; totalEvents: number }) {
-  const max = Math.max(1, ...days.map((day) => day.attempts + day.scheduled + day.early));
-  const first = days[0]?.key;
-  const last = days.at(-1)?.key;
+function ActivityHeatmap({ days, activeDays, totalEvents, todayKey }: { days: ActivityDay[]; activeDays: number; totalEvents: number; todayKey: string }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const weeks = Math.ceil(days.length / 7);
+  const calendarWidth = weeks * 15 - 3;
+  const monthLabels = activityMonthLabels(days);
+
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller || !window.matchMedia("(max-width: 639px)").matches) return;
+    const frame = window.requestAnimationFrame(() => { scroller.scrollLeft = scroller.scrollWidth; });
+    return () => window.cancelAnimationFrame(frame);
+  }, [weeks]);
+
   return <section className="mt-5 overflow-hidden rounded-lg border border-border bg-card">
-    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3"><div><h2 className="flex items-center gap-2 text-sm font-semibold"><CalendarCheck2 size={15} className="text-info" />Study activity</h2><p className="mt-0.5 text-xs text-muted-foreground">First attempts, scheduled reviews, and early reviews across 12 calendar weeks.</p></div><span className="font-mono text-[10px] text-muted-foreground">{activeDays} active days · {totalEvents} events</span></div>
-    {totalEvents === 0 ? <p className="px-4 py-7 text-sm text-muted-foreground">Recorded activity will appear here. Empty days are neutral—not missed goals.</p> : <div className="overflow-x-auto px-4 py-4"><div className="min-w-[32rem]">
-      <div className="mb-2 flex justify-between font-mono text-[9px] text-muted-foreground"><span>{first ? formatDate(first, "UTC") : "12 weeks ago"}</span><span>{last ? "This week" : "Today"}</span></div>
-      <div role="grid" aria-label="Study activity over twelve calendar weeks" className="grid h-[6.5rem] grid-flow-col grid-cols-[repeat(12,minmax(0,1fr))] grid-rows-7 gap-1">
-        {days.map((day) => {
-          const count = day.attempts + day.scheduled + day.early;
-          const level = day.isFuture || !count ? 0 : Math.min(4, Math.ceil(count / max * 4));
-          const label = day.isFuture ? `${day.key}: future day, not counted` : `${day.key}: ${day.attempts} first attempts, ${day.scheduled} scheduled reviews, ${day.early} early reviews`;
-          return <Tooltip key={day.key}><TooltipTrigger asChild><span role="gridcell" tabIndex={day.isFuture ? -1 : 0} aria-label={label} className={`activity-cell level-${level} min-h-0 min-w-0 rounded-[3px] outline-none focus-visible:ring-2 focus-visible:ring-ring`} /></TooltipTrigger><TooltipContent>{label}</TooltipContent></Tooltip>;
-        })}
+    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3"><div><h2 className="flex items-center gap-2 text-sm font-semibold"><CalendarCheck2 size={15} className="text-success" />Study activity</h2><p className="mt-0.5 text-xs text-muted-foreground">First attempts, scheduled reviews, and early reviews across the last 52 calendar weeks.</p></div><span className="font-mono text-[10px] text-muted-foreground">{activeDays} active {activeDays === 1 ? "day" : "days"} · {totalEvents} events</span></div>
+    {totalEvents === 0 ? <p className="px-4 py-7 text-sm text-muted-foreground">Recorded activity will appear here. Empty days are neutral—not missed goals.</p> : <div ref={scrollRef} className="overflow-x-auto px-4 py-4 sm:px-5"><div className="min-w-max">
+      <div className="grid grid-cols-[1.75rem_auto] gap-x-2">
+        <div aria-hidden="true" />
+        <div aria-hidden="true" className="activity-month-labels" style={{ width: calendarWidth }}>{monthLabels.map(({ label, week }) => <span key={`${label}-${week}`} style={{ left: week * 15 }}>{label}</span>)}</div>
+        <div aria-hidden="true" className="activity-weekdays">{["Mon", "", "Wed", "", "Fri", "", ""].map((label, index) => <span key={index}>{label}</span>)}</div>
+        <div role="grid" aria-label="Study activity over the last fifty-two calendar weeks" className="activity-grid" style={{ gridTemplateColumns: `repeat(${weeks}, 12px)` }}>
+          {days.map((day) => {
+            const count = day.attempts + day.scheduled + day.early;
+            const level = day.isFuture ? 0 : activityLevel(count);
+            const label = activityLabel(day);
+            const isToday = day.key === todayKey;
+            return <div key={day.key} role="gridcell" aria-label={label} className="size-3">
+              {day.isFuture ? <span aria-hidden="true" className="activity-cell activity-future" /> : <Tooltip><TooltipTrigger asChild><button type="button" aria-label={label} className={`activity-cell activity-level-${level} ${isToday ? "activity-today" : ""}`} /></TooltipTrigger><TooltipContent><ActivityTooltip day={day} /></TooltipContent></Tooltip>}
+            </div>;
+          })}
+        </div>
       </div>
-      <div className="mt-2 flex items-center justify-end gap-1.5 font-mono text-[9px] text-muted-foreground"><span>Less</span>{[0, 1, 2, 3, 4].map((level) => <i key={level} className={`activity-cell level-${level} size-3 rounded-[3px] border border-border/40`} />)}<span>More</span></div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 font-mono text-[9px] text-muted-foreground"><span>Past year · newest week at right</span><span className="flex items-center gap-1.5"><span>Less</span>{[0, 1, 2, 3, 4].map((level) => <i key={level} className={`activity-cell activity-level-${level}`} />)}<span>More</span></span></div>
     </div></div>}
   </section>;
+}
+
+function activityMonthLabels(days: ActivityDay[]) {
+  const labelsByWeek = new Map<number, string>();
+  days.forEach((day, index) => {
+    const current = new Date(`${day.key}T12:00:00.000Z`);
+    const previous = index ? new Date(`${days[index - 1]!.key}T12:00:00.000Z`) : null;
+    if (!previous || current.getUTCMonth() !== previous.getUTCMonth()) {
+      // A week can cross a month boundary. Keep the later month so labels
+      // never overlap in the same column (for example Sep 29–Oct 5).
+      labelsByWeek.set(Math.floor(index / 7), new Intl.DateTimeFormat("en", { month: "short", timeZone: "UTC" }).format(current));
+    }
+  });
+  return Array.from(labelsByWeek, ([week, label]) => ({ week, label }));
+}
+
+function activityLabel(day: ActivityDay) {
+  const date = new Intl.DateTimeFormat("en", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" }).format(new Date(`${day.key}T12:00:00.000Z`));
+  return day.isFuture ? `${date}: future day, not counted` : `${date}: ${day.attempts} first attempts, ${day.scheduled} scheduled reviews, ${day.early} early reviews`;
+}
+
+function ActivityTooltip({ day }: { day: ActivityDay }) {
+  return <div className="space-y-1"><p className="font-medium">{new Intl.DateTimeFormat("en", { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(new Date(`${day.key}T12:00:00.000Z`))}</p><p>{day.attempts} first attempts · {day.scheduled} scheduled reviews · {day.early} early reviews</p></div>;
 }
 
 function ChartSkeleton() {

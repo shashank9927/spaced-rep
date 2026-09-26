@@ -315,11 +315,17 @@ export async function getProgressData(): Promise<ProgressPayload | null> {
   const now = new Date();
   const profile = await getProfile();
   if (!profile) return null;
-  const [rows, logs] = await Promise.all([readStudyCards(), readAnalyticsLogs(new Date(now.getTime() - 92 * 86_400_000).toISOString())]);
+  // Use one server-only 365-day event set for Progress. The displayed
+  // contribution grid covers 52 Monday–Sunday weeks; the extra local days
+  // ensure a UTC offset never drops an edge event before local grouping.
+  let activityStart = localDateKey(now, profile.timezone);
+  for (let day = 0; day < 365; day += 1) activityStart = previousDateKey(activityStart);
+  const analyticsSince = `${previousDateKey(activityStart)}T00:00:00.000Z`;
+  const [rows, logs] = await Promise.all([readStudyCards(), readAnalyticsLogs(analyticsSince)]);
   const cards = enrichCards(rows, [], now);
   let ninetyDayStart = localDateKey(now, profile.timezone);
   for (let day = 1; day < 90; day += 1) ninetyDayStart = previousDateKey(ninetyDayStart);
-  const activity = activityForWeeks(logs, profile.timezone, now, 12);
+  const activity = activityForWeeks(logs, profile.timezone, now, 52);
   return {
     timezone: profile.timezone,
     todayKey: localDateKey(now, profile.timezone),

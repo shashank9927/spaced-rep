@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activityForWeeks, activitySummaryForDays, attentionProblems, isStrong, isWeak, progressSummary, queueOrder, recallOutcomesForWeeks, reviewLoadForCards } from "@/lib/analytics";
+import { activityForWeeks, activityLevel, activitySummaryForDays, attentionProblems, isStrong, isWeak, progressSummary, queueOrder, recallOutcomesForWeeks, reviewLoadForCards } from "@/lib/analytics";
 import type { StudyCard } from "@/lib/analytics";
 import type { ReviewLogSummary } from "@/lib/types";
 
@@ -95,17 +95,21 @@ describe("study analytics", () => {
     expect(summary).toMatchObject({ firstAttemptsThisWeek: 1, completedReviewsThisWeek: 1, earlyReviewsThisWeek: 1, activeStudyDaysThisWeek: 3, scheduledRecallSampleSize: 1, scheduledRecallRate: null });
   });
 
-  it("builds a 12-week activity grid with local calendar days and excludes future cells from totals", () => {
+  it("builds a 52-week activity grid with local calendar days and excludes future cells from totals", () => {
     const logs: ReviewLogSummary[] = [
       { id: "past", problem_id: card().id, rating: "good", reviewed_at: "2026-09-23T23:30:00.000Z", note: null, previous_due_at: null, next_due_at: "2026-09-27T08:00:00.000Z", scheduled_days: 3, event_kind: "first_attempt" },
     ];
     const days = activityForWeeks(logs, "Europe/Berlin", new Date("2026-09-24T12:00:00.000Z"));
-    expect(days).toHaveLength(84);
-    expect(days[0]?.key).toBe("2026-07-06");
+    expect(days).toHaveLength(364);
+    expect(days[0]?.key).toBe("2025-09-29");
     expect(days[0]?.isFuture).toBe(false);
     expect(days.at(-1)?.key).toBe("2026-09-27");
     expect(days.at(-1)?.isFuture).toBe(true);
     expect(activitySummaryForDays(days)).toMatchObject({ activeDays: 1, totalEvents: 1, firstAttempts: 1 });
+  });
+
+  it("uses stable, absolute contribution levels instead of scaling colors to a user's busiest day", () => {
+    expect([0, 1, 2, 3, 4, 5, 12].map(activityLevel)).toEqual([0, 1, 2, 3, 3, 4, 4]);
   });
 
   it("groups review outcomes by local Monday weeks and excludes early, first, future, and undone events", () => {

@@ -104,7 +104,7 @@ export function patternSignals(cards: StudyCard[], now = new Date(), timezone = 
   }).filter((signal) => signal.activeCount >= 2).sort((a, b) => b.dueCount - a.dueCount || (b.reinforcementCount / b.activeCount) - (a.reinforcementCount / a.activeCount) || (a.medianIntervalDays ?? Infinity) - (b.medianIntervalDays ?? Infinity) || a.name.localeCompare(b.name));
 }
 
-export function activityForDays(logs: ReviewLogSummary[], timezone: string, now = new Date(), count = 28) {
+export function activityForDays(logs: ReviewLogSummary[], timezone: string, now = new Date(), count = 28): ActivityDay[] {
   const byDay = new Map<string, { attempts: number; scheduled: number; early: number }>();
   for (const log of activeLogs(logs)) {
     const key = localDateKey(new Date(log.reviewed_at), timezone);
@@ -116,11 +116,15 @@ export function activityForDays(logs: ReviewLogSummary[], timezone: string, now 
   }
   const keys: string[] = []; let cursor = localDateKey(now, timezone);
   for (let index = 0; index < count; index += 1) { keys.unshift(cursor); cursor = previousDateKey(cursor); }
-  return keys.map((key) => ({ key, ...byDay.get(key) ?? { attempts: 0, scheduled: 0, early: 0 } }));
+  return keys.map((key) => ({ key, ...byDay.get(key) ?? { attempts: 0, scheduled: 0, early: 0 }, isFuture: false }));
 }
 
-/** Returns twelve Monday–Sunday calendar weeks, with future days marked rather than counted as inactivity. */
-export function activityForWeeks(logs: ReviewLogSummary[], timezone: string, now = new Date(), weekCount = 12): ActivityDay[] {
+/**
+ * Returns Monday–Sunday calendar weeks, with future days marked rather than
+ * counted as inactivity. The contribution calendar uses 52 weeks (364 days)
+ * so every column is a complete local week.
+ */
+export function activityForWeeks(logs: ReviewLogSummary[], timezone: string, now = new Date(), weekCount = 52): ActivityDay[] {
   const today = localDateKey(now, timezone);
   let cursor = weekStartKey(now, timezone);
   const daysToSubtract = (weekCount - 1) * 7;
@@ -138,6 +142,15 @@ export function activityForWeeks(logs: ReviewLogSummary[], timezone: string, now
     const key = nextDateKeyBy(cursor, index);
     return { key, ...byDay.get(key) ?? { attempts: 0, scheduled: 0, early: 0 }, isFuture: key > today };
   });
+}
+
+/** Stable, absolute contribution levels. A completed event always has the same color. */
+export function activityLevel(eventCount: number): 0 | 1 | 2 | 3 | 4 {
+  if (eventCount <= 0) return 0;
+  if (eventCount === 1) return 1;
+  if (eventCount === 2) return 2;
+  if (eventCount <= 4) return 3;
+  return 4;
 }
 
 function nextDateKeyBy(key: string, amount: number) {

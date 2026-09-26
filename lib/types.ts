@@ -136,7 +136,7 @@ export interface ActivityDay {
   attempts: number;
   scheduled: number;
   early: number;
-  isFuture?: boolean;
+  isFuture: boolean;
 }
 
 export interface ActivitySummary {
