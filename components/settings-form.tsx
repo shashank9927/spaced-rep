@@ -10,9 +10,13 @@ import { CATALOGS } from "@/lib/constants";
 import type { CatalogId } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useReviewUndo } from "@/components/review-undo-provider";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 
 export function SettingsForm({ displayName, timezone, selectedCatalog }: { displayName: string; timezone: string; selectedCatalog: CatalogId }) {
   const router = useRouter();
+  const { clearUndo } = useReviewUndo();
   const [name, setName] = useState(displayName);
   const [zone, setZone] = useState(timezone);
   const [catalog, setCatalog] = useState<CatalogId>(selectedCatalog);
@@ -28,8 +32,9 @@ export function SettingsForm({ displayName, timezone, selectedCatalog }: { displ
     setMessage(null);
     const settings = await saveSettings({ displayName: name, timezone: zone, selectedCatalog: catalog });
     if (!settings.ok) { setMessage(settings.error); return; }
-    if (catalog !== selectedCatalog) window.dispatchEvent(new CustomEvent("recallcode:catalog-changed", { detail: catalog }));
-    setMessage("Settings saved.");
+    if (settings.profile.selected_catalog !== selectedCatalog) window.dispatchEvent(new CustomEvent("recallcode:catalog-changed", { detail: settings.profile.selected_catalog }));
+    window.dispatchEvent(new CustomEvent("recallcode:profile-updated", { detail: settings.profile }));
+    setMessage(settings.message);
   });
 
   const closeReset = (open: boolean) => {
@@ -44,6 +49,7 @@ export function SettingsForm({ displayName, timezone, selectedCatalog }: { displ
     const result = await resetStudyProgress({ confirmation });
     if (!result.ok) { setResetMessage(result.error); return; }
     toast.dismiss();
+    clearUndo();
     toast.success(result.message ?? "Study progress reset. Your account and catalog were kept.");
     setResetOpen(false);
     setConfirmation("");
@@ -56,7 +62,7 @@ export function SettingsForm({ displayName, timezone, selectedCatalog }: { displ
 
       <section className="rounded-lg border border-border bg-card"><div className="border-b border-border px-4 py-3"><h2 className="text-sm font-semibold">Browsing catalog</h2><p className="mt-1 text-xs text-muted-foreground">Switching this changes the problem deck and search results—not your review queue.</p></div><div className="grid gap-2 p-4">{(Object.entries(CATALOGS) as [CatalogId, typeof CATALOGS[CatalogId]][]).map(([id, info]) => <button type="button" onClick={() => setCatalog(id)} className={cn("min-h-14 rounded-md border px-3 text-left", catalog === id ? "border-primary bg-accent" : "border-border hover:bg-accent")} key={id}><span className="block text-sm font-medium">{info.name}</span><span className="mt-0.5 block text-xs text-muted-foreground">{info.description}</span></button>)}</div></section>
 
-      <section className="rounded-lg border border-border bg-card"><div className="border-b border-border px-4 py-3"><h2 className="text-sm font-semibold">Profile</h2></div><div className="grid gap-4 p-4 sm:grid-cols-2"><label className="text-sm font-medium">Display name<input value={name} minLength={2} maxLength={60} onChange={(event) => setName(event.target.value)} className="mt-2 h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring" required /></label><label className="text-sm font-medium">Timezone<select value={zone} onChange={(event) => setZone(event.target.value)} className="mt-2 h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring">{zones.map((value) => <option key={value}>{value}</option>)}</select><span className="mt-1 block text-xs font-normal text-muted-foreground">Changes day grouping for future views. Existing FSRS timestamps are not rewritten.</span></label></div></section>
+      <section className="rounded-lg border border-border bg-card"><div className="border-b border-border px-4 py-3"><h2 className="text-sm font-semibold">Profile</h2></div><div className="grid gap-4 p-4 sm:grid-cols-2"><label className="text-sm font-medium">Display name<Input className="mt-2" value={name} minLength={2} maxLength={60} onChange={(event) => setName(event.target.value)} required /></label><label className="text-sm font-medium">Timezone<Select className="mt-2" value={zone} onChange={(event) => setZone(event.target.value)}>{zones.map((value) => <option key={value}>{value}</option>)}</Select><span className="mt-1 block text-xs font-normal text-muted-foreground">Changes day grouping for future views. Existing FSRS timestamps are not rewritten.</span></label></div></section>
 
       <div className="flex flex-wrap items-center gap-3"><Button disabled={pending}><Save size={16} /> {pending ? "Saving…" : "Save changes"}</Button>{message && <p className={cn("flex items-center gap-1.5 text-sm", message === "Settings saved." ? "text-success" : "text-destructive")}><Check size={16} /> {message}</p>}</div>
 
@@ -68,7 +74,7 @@ export function SettingsForm({ displayName, timezone, selectedCatalog }: { displ
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/65 backdrop-blur-sm" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-popover p-5 text-popover-foreground shadow-2xl outline-none">
           <div className="flex items-start justify-between gap-4"><div><Dialog.Title className="flex items-center gap-2 text-base font-semibold"><AlertTriangle size={18} className="text-destructive" />Reset all study progress?</Dialog.Title><Dialog.Description className="mt-2 text-sm leading-6 text-muted-foreground">This cannot be undone. Every review, private note, FSRS card, scheduled review, and activity record will be permanently removed.</Dialog.Description></div><Dialog.Close asChild><Button type="button" variant="ghost" size="icon-sm" disabled={resetPending} aria-label="Close reset dialog"><X size={16} /></Button></Dialog.Close></div>
-          <label className="mt-5 block text-sm font-medium">Type <span className="font-mono text-destructive">RESET</span> to continue<input autoComplete="off" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} disabled={resetPending} className="mt-2 h-10 w-full rounded-md border border-input bg-background px-3 font-mono text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-60" aria-describedby="reset-help" /></label>
+          <label className="mt-5 block text-sm font-medium">Type <span className="font-mono text-destructive">RESET</span> to continue<Input autoComplete="off" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} disabled={resetPending} className="mt-2 font-mono" aria-describedby="reset-help" /></label>
           <p id="reset-help" className="mt-2 text-xs text-muted-foreground">Your display name, timezone, catalog selection, invitation, and Google sign-in will remain.</p>
           {resetMessage && <p className="mt-3 text-sm text-destructive" role="alert">{resetMessage}</p>}
           <div className="mt-5 flex justify-end gap-2"><Dialog.Close asChild><Button type="button" variant="outline" disabled={resetPending}>Cancel</Button></Dialog.Close><Button type="button" variant="destructive" disabled={resetPending || confirmation !== "RESET"} onClick={reset}>{resetPending ? "Resetting…" : "Permanently reset"}</Button></div>

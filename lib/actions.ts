@@ -13,6 +13,7 @@ import { getCatalogSearchIndex, getProblemHistoryPage } from "@/lib/queries";
 import { measure } from "@/lib/performance";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
+export type SaveSettingsResult = { ok: true; message: string; profile: { display_name: string; timezone: string; selected_catalog: (typeof CATALOG_IDS)[number] } } | { ok: false; error: string };
 export type ActionErrorCode = "invalid_input" | "unauthorized" | "conflict" | "rate_limited" | "temporary_failure";
 export type ActionFailure = { ok: false; code: ActionErrorCode; error: string; retryable: boolean };
 export type ReviewActionResult = {
@@ -130,7 +131,7 @@ export async function submitReview(input: SubmitReviewInput): Promise<ReviewActi
   try {
     const profile = await activeProfile();
     const supabase = await createClient();
-    const { data: row, error: cardError } = await supabase.from("user_problem_cards").select("*").eq("user_id", profile.id).eq("problem_id", parsed.data.problemId).maybeSingle();
+    const { data: row, error: cardError } = await supabase.from("user_problem_cards").select("due_at,stability,difficulty,elapsed_days,scheduled_days,learning_steps,reps,lapses,state,last_review_at,last_rating,version,first_attempted_at").eq("user_id", profile.id).eq("problem_id", parsed.data.problemId).maybeSingle();
     if (cardError) return reviewFailure("temporary_failure", safeErrorMessage(cardError, "We could not load this problem."));
     const now = new Date();
     const current = row ? dbCard(row) : null;
@@ -172,7 +173,7 @@ export async function undoReview(input: { reviewLogId: string; expectedVersion: 
   } catch (error) { return reviewFailure(classifyActionError(error), safeErrorMessage(error, "This review can no longer be undone.")); }
 }
 
-export async function saveSettings(input: { displayName: string; timezone: string; selectedCatalog: string }): Promise<ActionResult> {
+export async function saveSettings(input: { displayName: string; timezone: string; selectedCatalog: string }): Promise<SaveSettingsResult> {
   const parsed = profileSettingsSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Enter a name, timezone, and valid study list." };
   try {
@@ -180,7 +181,7 @@ export async function saveSettings(input: { displayName: string; timezone: strin
     const { error } = await saveProfileSettings(profile, parsed.data, Boolean(profile.display_name));
     if (error) return { ok: false, error: safeErrorMessage(error, "We could not save settings.") };
     revalidatePath("/today"); revalidatePath("/problems"); revalidatePath("/settings");
-    return { ok: true, message: "Settings saved." };
+    return { ok: true, message: "Settings saved.", profile: { display_name: parsed.data.displayName, timezone: parsed.data.timezone, selected_catalog: parsed.data.selectedCatalog } };
   } catch (error) { return { ok: false, error: safeErrorMessage(error, "We could not save settings.") }; }
 }
 

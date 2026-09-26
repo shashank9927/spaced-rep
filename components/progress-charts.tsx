@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bar, BarChart, CartesianGrid, Legend, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import type { ProgressPayload } from "@/lib/types";
-import { ChartContainer } from "@/components/ui/chart";
+import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 
 type ProgressData = Pick<ProgressPayload, "reviewLoad" | "recallOutcomes">;
 
@@ -60,8 +60,8 @@ export function ProgressCharts({ data }: { data: ProgressData }) {
               <CartesianGrid vertical={false} stroke="var(--border)" strokeDasharray="3 3" />
               <XAxis dataKey="shortLabel" tickLine={false} axisLine={false} tickMargin={8} tick={{ fill: "var(--muted-foreground)", fontSize: 10 }} />
               <YAxis allowDecimals={false} width={30} tickLine={false} axisLine={false} tick={{ fill: "var(--muted-foreground)", fontSize: 10 }} />
-              <Tooltip cursor={{ fill: "var(--muted-surface)", opacity: 0.45 }} content={<LoadTooltip />} />
-              <Legend verticalAlign="top" align="right" height={28} iconType="circle" iconSize={7} formatter={(value) => <span className="text-[10px] text-muted-foreground">{String(value)}</span>} />
+              <ChartTooltip cursor={{ fill: "var(--muted)", opacity: 0.45 }} content={<LoadTooltip />} />
+              <ChartLegend verticalAlign="top" align="right" height={28} content={<ChartLegendContent className="justify-end" />} />
               <Bar dataKey="completed" name="Completed" stackId="load" fill="var(--color-completed)" radius={[0, 0, 0, 0]} isAnimationActive={!reducedMotion} animationDuration={220} />
               <Bar dataKey="remaining" name="Remaining today" stackId="load" fill="var(--color-remaining)" radius={[3, 3, 0, 0]} isAnimationActive={!reducedMotion} animationDuration={220} />
               <Bar dataKey="future" name="Future due" stackId="load" fill="var(--color-future)" radius={[3, 3, 0, 0]} isAnimationActive={!reducedMotion} animationDuration={220} />
@@ -82,8 +82,8 @@ export function ProgressCharts({ data }: { data: ProgressData }) {
               <CartesianGrid vertical={false} stroke="var(--border)" strokeDasharray="3 3" />
               <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} tick={{ fill: "var(--muted-foreground)", fontSize: 10 }} />
               <YAxis allowDecimals={false} width={30} tickLine={false} axisLine={false} tick={{ fill: "var(--muted-foreground)", fontSize: 10 }} />
-              <Tooltip cursor={{ fill: "var(--muted-surface)", opacity: 0.45 }} content={<OutcomeTooltip />} />
-              <Legend verticalAlign="top" align="right" height={26} iconType="circle" iconSize={7} formatter={(value) => <span className="text-[10px] text-muted-foreground">{String(value)}</span>} />
+              <ChartTooltip cursor={{ fill: "var(--muted)", opacity: 0.45 }} content={<OutcomeTooltip />} />
+              <ChartLegend verticalAlign="top" align="right" height={26} content={<ChartLegendContent className="justify-end" />} />
               <Bar dataKey="recalled" name="Recalled" stackId="outcome" fill="var(--color-recalled)" radius={[0, 0, 0, 0]} isAnimationActive={!reducedMotion} animationDuration={220} />
               <Bar dataKey="forgot" name="Forgot" stackId="outcome" fill="var(--color-forgot)" radius={[3, 3, 0, 0]} isAnimationActive={!reducedMotion} animationDuration={220} />
             </BarChart>
@@ -96,18 +96,20 @@ export function ProgressCharts({ data }: { data: ProgressData }) {
   </div>;
 }
 
-function LoadTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload?: Record<string, unknown> }> }) {
+type TooltipPayload = Array<{ name?: string; value?: string | number; color?: string; dataKey?: string | number; payload?: Record<string, unknown> }>;
+
+function LoadTooltip({ active, payload }: { active?: boolean; payload?: TooltipPayload }) {
   if (!active || !payload?.length) return null;
   const day = payload[0]?.payload;
   if (!day) return null;
-  return <div className="min-w-40 rounded-md border border-border bg-popover px-3 py-2 text-popover-foreground shadow-lg"><p className="text-xs font-semibold">{String(day.fullLabel ?? day.label)}</p><dl className="mt-1 space-y-1 text-xs text-muted-foreground"><div className="flex justify-between gap-4"><dt>Completed today</dt><dd>{String(day.completed ?? 0)}</dd></div><div className="flex justify-between gap-4"><dt>Remaining today</dt><dd>{String(day.remaining ?? 0)}</dd></div><div className="flex justify-between gap-4"><dt>Future due</dt><dd>{String(day.future ?? 0)}</dd></div></dl></div>;
+  return <ChartTooltipContent active payload={payload} label={String(day.fullLabel ?? day.label)} />;
 }
 
-function OutcomeTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload?: Record<string, unknown> }> }) {
+function OutcomeTooltip({ active, payload }: { active?: boolean; payload?: TooltipPayload }) {
   if (!active || !payload?.length) return null;
   const week = payload[0]?.payload;
   if (!week) return null;
   const sampleSize = Number(week.sampleSize ?? 0);
   const rate = typeof week.recallRate === "number" ? `${Math.round(week.recallRate * 100)}%` : "—";
-  return <div className="min-w-40 rounded-md border border-border bg-popover px-3 py-2 text-popover-foreground shadow-lg"><p className="text-xs font-semibold">Week of {String(week.label)}</p><dl className="mt-1 space-y-1 text-xs text-muted-foreground"><div className="flex justify-between gap-4"><dt>Recalled</dt><dd>{String(week.recalledCount)}</dd></div><div className="flex justify-between gap-4"><dt>Forgot</dt><dd>{String(week.forgotCount)}</dd></div><div className="flex justify-between gap-4"><dt>Sample</dt><dd>{sampleSize}</dd></div>{sampleSize >= 5 && <div className="flex justify-between gap-4"><dt>Weekly recall</dt><dd>{rate}</dd></div>}</dl></div>;
+  return <div className="rounded-md border border-border bg-popover text-popover-foreground shadow-lg"><ChartTooltipContent active payload={payload} label={`Week of ${String(week.label)}`} className="border-0 shadow-none" /><div className="flex min-w-40 justify-between gap-4 border-t border-border px-3 py-2 text-xs text-muted-foreground"><span>Sample · {sampleSize}</span>{sampleSize >= 5 && <span>Recall · {rate}</span>}</div></div>;
 }

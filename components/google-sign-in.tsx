@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { Button } from "@/components/ui/button";
 
 export function GoogleSignIn() {
   const [error, setError] = useState<string | null>(null);
@@ -26,9 +27,9 @@ export function GoogleSignIn() {
     }
   }
   return <>
-    <button className="google-button" onClick={signIn} disabled={loading}>
-      <span className="google-g">G</span>{loading ? "Connecting…" : "Continue with Google"}
-    </button>
-    {error && <p className="form-error" role="alert">{error}</p>}
+    <Button className="h-11 w-full" variant="outline" onClick={signIn} disabled={loading}>
+      <span className="font-semibold text-info">G</span>{loading ? "Connecting…" : "Continue with Google"}
+    </Button>
+    {error && <p className="mt-3 text-sm text-destructive" role="alert">{error}</p>}
   </>;
 }

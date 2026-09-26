@@ -2,6 +2,7 @@
 
 import { Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 
 type Theme = "light" | "dark";
 
@@ -25,5 +26,5 @@ export function ThemeToggle() {
   }
 
   const nextLabel = theme === "dark" ? "light" : "dark";
-  return <button className="theme-toggle public-theme-toggle" type="button" onClick={toggle} aria-label={`Switch to ${nextLabel} mode`} title={`Switch to ${nextLabel} mode`}><span aria-hidden="true">{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</span><span>{theme === "dark" ? "Light mode" : "Dark mode"}</span></button>;
+  return <Button className="fixed right-4 top-4 z-20" variant="outline" size="sm" type="button" onClick={toggle} aria-label={`Switch to ${nextLabel} mode`} title={`Switch to ${nextLabel} mode`}>{theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}<span className="hidden sm:inline">{theme === "dark" ? "Light" : "Dark"}</span></Button>;
 }

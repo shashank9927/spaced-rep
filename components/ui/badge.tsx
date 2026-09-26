@@ -9,7 +9,7 @@ const badgeVariants = cva("inline-flex items-center rounded-full border px-2 py-
       easy: "border-success/20 bg-success/10 text-success",
       medium: "border-warning/20 bg-warning/10 text-warning",
       hard: "border-destructive/20 bg-destructive/10 text-destructive",
-      due: "border-warning/20 bg-warning/10 text-warning",
+      due: "border-destructive/20 bg-destructive/10 text-destructive",
       muted: "border-border bg-muted text-muted-foreground",
     },
     },

@@ -67,9 +67,24 @@ export interface TodayPayload {
   dueReviews: DueProblem[];
   upcomingReviews: DueProblem[];
   firstAttemptsThisWeek: number;
-  completedReviewsThisWeek: number;
+  scheduledReviewsThisWeek: number;
+  earlyReviewsThisWeek: number;
   activeProblemCount: number;
   medianIntervalDays: number | null;
+}
+
+export interface SchedulerPresentation {
+  desiredRetention: number;
+  maximumIntervalDays: number;
+}
+
+export interface PendingReviewUndo {
+  reviewLogId: string;
+  problemId: string;
+  expectedVersion: number;
+  expiresAt: number;
+  queuePosition?: number;
+  problem?: DueProblem;
 }
 
 export interface DueQueuePayload {
@@ -161,6 +176,7 @@ export interface ProgressPayload {
   recallOutcomes: RecallOutcomeWeek[];
   attention: AttentionProblem[];
   patterns: PatternSignal[];
+  scheduler: SchedulerPresentation;
 }
 
 export interface DueProblem extends ProblemSummary {

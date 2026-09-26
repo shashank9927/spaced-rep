@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { PendingLink } from "@/components/pending-link";
+import { ReviewUndoProvider } from "@/components/review-undo-provider";
+import { Empty } from "@/components/ui/empty";
 
 const navigation = [
   { href: "/today", label: "Today", icon: LayoutDashboard },
@@ -61,17 +63,17 @@ export function AppShell({ children, controls, problem }: { children: ReactNode;
     return next;
   }), []);
 
-  return <TooltipProvider delayDuration={250}><div className="min-h-dvh bg-background text-foreground">
+  return <TooltipProvider delayDuration={250}><ReviewUndoProvider><div className="min-h-dvh bg-background text-foreground">
     <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur-xl"><div className="mx-auto flex h-15 w-full max-w-[1440px] items-center gap-3 px-4 sm:px-6 lg:px-8"><Link href="/today" className="flex shrink-0 items-center gap-2.5 font-semibold tracking-[-.035em]"><span className="grid size-8 place-items-center rounded-md bg-primary text-primary-foreground"><Code2 size={17} strokeWidth={2.4} /></span><span className="hidden text-[15px] sm:inline">RecallCode</span></Link><nav className="ml-2 hidden items-center gap-0.5 rounded-lg border border-border bg-card/60 p-1 md:flex" aria-label="Main navigation"><Suspense fallback={<NavigationFallback />}><NavigationLinks /></Suspense></nav><div className="ml-auto flex min-w-0 items-center gap-1.5">{controls}<ThemeButton theme={theme} onToggle={toggleTheme} /></div></div></header>
     <main className="mx-auto w-full max-w-[1280px] px-4 py-6 pb-24 sm:px-6 md:py-8 md:pb-12 lg:px-8">{children}</main>
     <nav className="fixed inset-x-2 bottom-[max(.5rem,env(safe-area-inset-bottom))] z-30 grid grid-cols-4 rounded-xl border border-border bg-card/94 p-1 shadow-2xl backdrop-blur-xl md:hidden" aria-label="Main navigation"><Suspense fallback={<NavigationFallback mobile />}><NavigationLinks mobile /></Suspense></nav>
     {problem}
     <Toaster theme={theme} position="bottom-right" richColors closeButton />
-  </div></TooltipProvider>;
+  </div></ReviewUndoProvider></TooltipProvider>;
 }
 
 export function ShellControlsSkeleton() {
   return <div aria-label="Loading account controls" className="flex items-center gap-1.5"><span className="hidden h-8 w-18 animate-pulse rounded-md bg-muted sm:block" /><span className="h-9 w-9 animate-pulse rounded-md bg-muted sm:w-48 lg:w-64" /><span className="size-8 animate-pulse rounded-md bg-muted" /></div>;
 }
 
-export function EmptyState({ title, body, action }: { title: string; body: string; action?: ReactNode }) { return <div className="rounded-lg border border-dashed border-border bg-card px-6 py-12 text-center"><Code2 className="mx-auto mb-3 text-muted-foreground" size={26} /><h2 className="text-base font-semibold">{title}</h2><p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">{body}</p>{action && <div className="mt-4">{action}</div>}</div>; }
+export function EmptyState({ title, body, action }: { title: string; body: string; action?: ReactNode }) { return <Empty icon={<Code2 size={26} />} title={title} description={body} action={action} />; }

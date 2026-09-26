@@ -5,25 +5,25 @@ import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
 import { ArrowLeft, ArrowUpRight, History, MoreHorizontal, Play, RotateCcw } from "lucide-react";
 import { ReviewRatingForm } from "@/components/review-rating-form";
-import { loadProblemHistory, undoReview, type ReviewActionResult } from "@/lib/actions";
+import { loadProblemHistory, type ReviewActionResult, type UndoReviewResult } from "@/lib/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { StudyCard } from "@/lib/analytics";
-import type { CompleteUserProblemCard, ProblemSummary, RatingOption, ReviewLogSummary } from "@/lib/types";
+import type { CompleteUserProblemCard, PendingReviewUndo, ProblemSummary, RatingOption, ReviewLogSummary } from "@/lib/types";
 import { formatDate, formatDateTime, localDateKey } from "@/lib/utils";
+import { useReviewUndo } from "@/components/review-undo-provider";
+import { reviewUndoExpiresAt } from "@/lib/review-undo";
 
 type Completion = Extract<ReviewActionResult, { ok: true }>;
 
 export function ProblemDetailClient({ problem, card, logs, nextCursor: initialNextCursor, timezone, options, panel = false }: { problem: ProblemSummary; card: StudyCard | null; logs: ReviewLogSummary[]; nextCursor: string | null; timezone: string; options: RatingOption[]; panel?: boolean }) {
+  const { registerUndo } = useReviewUndo();
   const [recording, setRecording] = useState(false);
   const [currentCard, setCurrentCard] = useState(card);
   const [history, setHistory] = useState(logs);
   const [nextCursor, setNextCursor] = useState(initialNextCursor);
   const [ratingChoices, setRatingChoices] = useState(options);
   const [historyPending, startHistoryTransition] = useTransition();
-  const [pending, startTransition] = useTransition();
-  const [lastReview, setLastReview] = useState<Completion | null>(null);
-  const [undoSeconds, setUndoSeconds] = useState(600);
   const [confirmation, setConfirmation] = useState<string | null>(null);
   const [now, setNow] = useState(() => new Date());
   const todayKey = localDateKey(now, timezone);
@@ -37,48 +37,32 @@ export function ProblemDetailClient({ problem, card, logs, nextCursor: initialNe
   }, []);
 
   useEffect(() => {
-    if (!lastReview) return;
-    const expiresAt = new Date(lastReview.reviewedAt).getTime() + 10 * 60_000;
-    const update = () => {
-      const seconds = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
-      setUndoSeconds(seconds);
-      if (seconds === 0) {
-        setLastReview(null);
-        setConfirmation("The 10-minute undo window has expired.");
-      }
+    const onUndone = (event: Event) => {
+      const detail = (event as CustomEvent<{ pending: PendingReviewUndo; result: UndoReviewResult }>).detail;
+      if (!detail?.result.ok || detail.pending.problemId !== problem.id) return;
+      setCurrentCard(detail.result.card ? toStudyCard(problem, detail.result.card, detail.result.retrievabilityNow ?? 0, null, detail.result.card.last_review ?? null) : null);
+      setRatingChoices(detail.result.ratingOptions);
+      setHistory((entries) => entries.filter((entry) => entry.id !== detail.pending.reviewLogId));
+      setConfirmation("Review undone. The previous schedule was restored.");
     };
-    update();
-    const timer = window.setInterval(update, 1000);
-    return () => window.clearInterval(timer);
-  }, [lastReview]);
+    window.addEventListener("recallcode:review-undone", onUndone);
+    return () => window.removeEventListener("recallcode:review-undone", onUndone);
+  }, [problem]);
 
   const complete = (result: Completion) => {
     setCurrentCard((existing) => toStudyCard(problem, result.card, result.retrievabilityNow, result.note, result.reviewedAt));
     setRecording(false);
     setRatingChoices(result.ratingOptions);
-    setLastReview(result);
+    registerUndo({ reviewLogId: result.reviewLogId, problemId: problem.id, expectedVersion: result.card.version, expiresAt: reviewUndoExpiresAt(result.reviewedAt) });
     setHistory((entries) => [{ id: result.reviewLogId, problem_id: problem.id, rating: result.card.latestRating, reviewed_at: result.reviewedAt, note: result.note, previous_due_at: currentCard?.card.due_at ?? null, next_due_at: result.nextDue, scheduled_days: result.newIntervalDays, event_kind: result.eventKind, result_version: result.card.version }, ...entries]);
     setConfirmation(`Saved — next review in ${result.newIntervalDays} day${result.newIntervalDays === 1 ? "" : "s"}.`);
-  };
-
-  const undo = () => {
-    if (!lastReview) return;
-    startTransition(async () => {
-      const result = await undoReview({ reviewLogId: lastReview.reviewLogId, expectedVersion: lastReview.card.version });
-      if (!result.ok) { setConfirmation(result.error); setLastReview(null); return; }
-      setCurrentCard(result.card ? toStudyCard(problem, result.card, result.retrievabilityNow ?? 0, null, result.card.last_review ?? null) : null);
-      setRatingChoices(result.ratingOptions);
-      setHistory((entries) => entries.filter((entry) => entry.id !== lastReview.reviewLogId));
-      setLastReview(null);
-      setConfirmation("Review undone.");
-    });
   };
 
   return <section className={panel ? "p-5" : "mx-auto max-w-3xl"}>
     {!panel && <Link href="/problems" className="mb-5 inline-flex min-h-10 items-center gap-2 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft size={16} /> Problems</Link>}
     <div className="flex flex-wrap items-start justify-between gap-4"><div className="min-w-0"><p className="font-mono text-xs text-muted-foreground">LEETCODE #{problem.leetcodeNumber}</p><h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">{problem.title}</h1><div className="mt-3 flex flex-wrap gap-1.5"><Badge variant={problem.difficulty.toLowerCase() as "easy" | "medium" | "hard"}>{problem.difficulty}</Badge>{problem.topics.map((topic) => <Badge variant="muted" key={topic}>{topic}</Badge>)}</div></div><div className="flex shrink-0 flex-wrap gap-2">{problem.neetcode_url && <Button size="sm" asChild><a href={problem.neetcode_url} target="_blank" rel="noopener noreferrer">Open on NeetCode <ArrowUpRight size={14} /></a></Button>}{problem.leetcode_url && <Button size="sm" variant="outline" asChild><a href={problem.leetcode_url} target="_blank" rel="noopener noreferrer">Open on LeetCode <ArrowUpRight size={14} /></a></Button>}{!problem.neetcode_url && !problem.leetcode_url && <span className="flex min-h-9 items-center text-xs text-muted-foreground">External link unavailable</span>}</div></div>
 
-    {confirmation && <div role="status" className="mt-4 flex flex-wrap items-center gap-3 rounded-md border border-success/25 bg-success/10 px-3 py-2 text-sm text-success"><span>{confirmation}</span>{lastReview && <><button type="button" disabled={pending} className="font-semibold underline underline-offset-2 disabled:opacity-60" onClick={undo}>{pending ? "Undoing…" : "Undo last review"}</button><span className="font-mono text-xs">{formatClock(undoSeconds)} left</span></>}</div>}
+    {confirmation && <div role="status" className="mt-4 rounded-md border border-success/25 bg-success/10 px-3 py-2 text-sm text-success">{confirmation}</div>}
 
     <dl className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border text-sm sm:grid-cols-3"><Fact label="Status" value={statusLabel} /><Fact label="Recorded ratings" value={currentCard ? String(currentCard.card.reps) : "—"} /><Fact label="Forgot during review" value={currentCard ? String(currentCard.card.lapses) : "—"} help="FSRS lapse count; first-attempt Forgot ratings do not count as review lapses." /><Fact label="Current review spacing" value={currentCard ? `${currentCard.card.scheduled_days} days` : "—"} /><Fact label="First attempt" value={currentCard ? formatDate(currentCard.card.first_attempted_at, timezone) : "—"} /><Fact label="Latest result" value={currentCard?.latest_rating ? currentCard.latest_rating === "again" ? "Forgot" : currentCard.latest_rating[0].toUpperCase() + currentCard.latest_rating.slice(1) : "—"} /></dl>
 
@@ -96,4 +80,3 @@ function toStudyCard(problem: ProblemSummary, card: CompleteUserProblemCard, rec
 
 function Fact({ label, value, help }: { label: string; value: string; help?: string }) { return <div className="bg-card px-3 py-3"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 truncate text-sm font-medium" title={help}>{value}</dd>{help && <dd className="sr-only">{help}</dd>}</div>; }
 function eventLabel(kind?: ReviewLogSummary["event_kind"]) { return kind === "first_attempt" ? "First attempt" : kind === "early_review" ? "Early review" : "Scheduled review"; }
-function formatClock(seconds: number) { return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`; }

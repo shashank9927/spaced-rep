@@ -2,9 +2,14 @@ import { createEmptyCard, FSRSVersion, fsrs, Rating, type Card, type Grade } fro
 import { RATING_COPY } from "@/lib/constants";
 import type { FsrsCardState, RatingOption, ReviewRating } from "@/lib/types";
 
+export const SCHEDULER_PRESENTATION = {
+  desiredRetention: 0.9,
+  maximumIntervalDays: 365,
+} as const;
+
 const scheduler = fsrs({
-  request_retention: 0.9,
-  maximum_interval: 365,
+  request_retention: SCHEDULER_PRESENTATION.desiredRetention,
+  maximum_interval: SCHEDULER_PRESENTATION.maximumIntervalDays,
   enable_fuzz: false,
   // Coding reviews are day-sized work, not a minutes-long flashcard session.
   enable_short_term: false,

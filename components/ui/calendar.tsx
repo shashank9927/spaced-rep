@@ -27,6 +27,23 @@ export function Calendar({
       review: "rc-calendar-review",
       completed: "rc-calendar-completed",
     }}
+    labels={{
+      labelDayButton: (date) => {
+        const key = date.toISOString().slice(0, 10);
+        const dateLabel = new Intl.DateTimeFormat("en", {
+          weekday: "long",
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+          timeZone: "UTC",
+        }).format(date);
+        const indicators = [
+          modifiers?.review?.some((value) => value.toISOString().slice(0, 10) === key) ? "reviews scheduled" : "",
+          modifiers?.completed?.some((value) => value.toISOString().slice(0, 10) === key) ? "activity completed" : "",
+        ].filter(Boolean);
+        return indicators.length ? `${dateLabel}, ${indicators.join(", ")}` : dateLabel;
+      },
+    }}
     classNames={{
       root: "w-full min-w-[34rem] text-sm",
       months: "w-full",

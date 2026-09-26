@@ -8,7 +8,7 @@ import { activityForWeeks, activitySummaryForDays, attentionProblems, attentionR
 import { getProfile, type Profile } from "@/lib/auth";
 import { measure } from "@/lib/performance";
 import { buildScheduleAgenda, buildScheduleData, isDueOnOrBeforeLocalDay } from "@/lib/study-plan";
-import { retrievability } from "@/lib/scheduler";
+import { retrievability, SCHEDULER_PRESENTATION } from "@/lib/scheduler";
 import { createAdminClient, createClient } from "@/lib/supabase/server";
 import { leetcodeNumberFromSourceId, localDateKey } from "@/lib/utils";
 import { isAllowedExternalUrl } from "@/lib/security";
@@ -191,7 +191,8 @@ function todayStats(cards: StudyCard[], logs: ReviewLogSummary[], timezone: stri
   const thisWeek = logs.filter((log) => { const key = localDateKey(new Date(log.reviewed_at), timezone); return !log.reversed_at && key >= start && key <= today; });
   return {
     firstAttemptsThisWeek: thisWeek.filter((log) => log.event_kind === "first_attempt").length,
-    completedReviewsThisWeek: thisWeek.filter((log) => log.event_kind !== "first_attempt").length,
+    scheduledReviewsThisWeek: thisWeek.filter((log) => log.event_kind === "scheduled_review").length,
+    earlyReviewsThisWeek: thisWeek.filter((log) => log.event_kind === "early_review").length,
     activeProblemCount: cards.length,
     medianIntervalDays: median(cards.map((card) => card.card.scheduled_days).filter((days) => days > 0)),
   };
@@ -335,6 +336,7 @@ export async function getProgressData(): Promise<ProgressPayload | null> {
     activitySummary: activitySummaryForDays(activity),
     recallOutcomes: recallOutcomesForWeeks(logs, profile.timezone, now, 12),
     reviewLoad: reviewLoadForCards(cards, logs, profile.timezone, now),
+    scheduler: SCHEDULER_PRESENTATION,
   };
 }
 
