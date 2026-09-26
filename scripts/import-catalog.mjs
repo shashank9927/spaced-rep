@@ -92,7 +92,10 @@ if (topicNames.length) {
   const topicId = new Map(topicRows.map((row) => [row.name, row.id]));
   // Rebuild metadata links as a set, so each problem has exactly one durable
   // primary topic. This never touches user cards or review history.
-  for (const [index, chunk] of chunks([...problemId.values()]).entries()) await assert(`Clearing topic links batch ${index + 1}`, supabase.from("problem_topics").delete().in("problem_id", chunk));
+  // A PostgREST `.in()` filter is encoded into the request URL. Keep this
+  // batch smaller than normal write batches so larger catalogs stay below
+  // the gateway's request-line limit.
+  for (const [index, chunk] of chunks([...problemId.values()], 100).entries()) await assert(`Clearing topic links batch ${index + 1}`, supabase.from("problem_topics").delete().in("problem_id", chunk));
   const links = snapshot.problems.flatMap((problem) => problem.topics.map((topic, position) => ({ problem_id: problemId.get(problem.sourceId), topic_id: topicId.get(topic), position, is_primary: position === 0 }))).filter((link) => link.problem_id && link.topic_id);
   for (const [index, chunk] of chunks(links).entries()) await assert(`Linking problem topics batch ${index + 1}`, supabase.from("problem_topics").upsert(chunk, { onConflict: "problem_id,topic_id" }));
 }

@@ -32,7 +32,11 @@ If this project already has the older RecallCode schema, open Supabase **SQL Edi
 
 ## Checks
 
-Run `npm run lint`, `npm test`, and `npm run build` before deploying.
+Run `npx tsc --noEmit`, `npm run lint`, `npm run test:unit`, `npm audit --audit-level=moderate`, and `npm run build` before deploying.
+
+`npm run test:e2e -- --project=public` uses the installed Microsoft Edge browser and does not touch Supabase data. The complete authenticated browser and database suites run in GitHub Actions against a disposable local Supabase stack; they never use deployment credentials or production data. Developers who already have Docker and the Supabase CLI can run the same database checks with `supabase db start` followed by `npm run test:db`.
+
+Real Google OAuth is intentionally verified with one manual production smoke test. Automated browser tests seed isolated Google-shaped test identities without adding an authentication bypass to the application.
 
 ## Deploy
 

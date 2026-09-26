@@ -1,7 +1,7 @@
 import "server-only";
 
 import { redirect } from "next/navigation";
-import { cacheLife } from "next/cache";
+import { connection } from "next/server";
 import { cache } from "react";
 import type { User } from "@supabase/supabase-js";
 import { displayNameFromEmail } from "@/lib/utils";
@@ -20,10 +20,6 @@ export interface Profile {
 }
 
 async function readSessionClaims() {
-  "use cache: private";
-  // This result is kept only in the signed-in browser's router cache. It is
-  // never shared between members or persisted in a server data cache.
-  cacheLife({ stale: 30 });
   const supabase = await createClient();
   const result = await measure("auth.claims", () => supabase.auth.getClaims());
   const claims = result.data?.claims;
@@ -34,8 +30,6 @@ async function readSessionClaims() {
 export const getSessionClaims = cache(readSessionClaims);
 
 async function readProfile(): Promise<Profile | null> {
-  "use cache: private";
-  cacheLife({ stale: 30 });
   const claims = await getSessionClaims();
   if (!claims?.sub) return null;
   const supabase = await createClient();
@@ -43,12 +37,20 @@ async function readProfile(): Promise<Profile | null> {
     .select("id,email,display_name,timezone,selected_catalog,role,is_active")
     .eq("id", claims.sub)
     .maybeSingle());
-  return data as Profile | null;
+  const profile = data as Profile | null;
+  // Authorization state is deliberately request-fresh. React cache() only
+  // deduplicates this lookup within the current render and cannot keep a
+  // disabled membership alive in the browser router cache.
+  return profile?.is_active ? profile : null;
 }
 
 export const getProfile = cache(readProfile);
 
 export async function requireProfile(options?: { onboarding?: boolean; admin?: boolean }): Promise<Profile> {
+  // Supabase claim validation and profile lookup are request-specific. Make
+  // this boundary explicit so the shared auth helper is never evaluated in
+  // the Cache Components prerender pass.
+  await connection();
   const profile = await getProfile();
   if (!profile) redirect("/login");
   if (options?.admin && profile.role !== "admin") redirect("/today");

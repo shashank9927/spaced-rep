@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { ChevronDown, LoaderCircle, NotebookPen } from "lucide-react";
-import { submitReview, type ReviewActionResult } from "@/lib/actions";
+import { submitReview, type ReviewActionResult, type ReviewConflictFailure } from "@/lib/actions";
 import type { RatingOption } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 
 const shortcuts: Record<string, RatingOption["rating"]> = { "1": "again", "2": "hard", "3": "good", "4": "easy" };
 
-export function ReviewRatingForm({ problemId, options, onComplete }: { problemId: string; options: RatingOption[]; onComplete?: (result: Extract<ReviewActionResult, { ok: true }>) => void }) {
+export function ReviewRatingForm({ problemId, options, onComplete, onConflict }: { problemId: string; options: RatingOption[]; onComplete?: (result: Extract<ReviewActionResult, { ok: true }>) => void; onConflict?: (result: ReviewConflictFailure) => void }) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
   const [pending, startTransition] = useTransition();
@@ -24,12 +24,17 @@ export function ReviewRatingForm({ problemId, options, onComplete }: { problemId
     const requestId = requestIdRef.current.id;
     startTransition(async () => {
       const result = await submitReview({ problemId, rating, note: normalizedNote || undefined, requestId });
-      if (!result.ok) { setMessage(result.error); if (result.code === "conflict" || result.code === "invalid_input") requestIdRef.current = null; return; }
+      if (!result.ok) {
+        setMessage(result.error);
+        if (result.code === "conflict" && "latestCard" in result) onConflict?.(result as ReviewConflictFailure);
+        if (result.code === "conflict" || result.code === "invalid_input") requestIdRef.current = null;
+        return;
+      }
       requestIdRef.current = null;
       setNote("");
       onComplete?.(result);
     });
-  }, [note, onComplete, problemId]);
+  }, [note, onComplete, onConflict, problemId]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

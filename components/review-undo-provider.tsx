@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, useTransition, type ReactNode } from "react";
 import { History, X } from "lucide-react";
 import { toast } from "sonner";
+import { useRouter } from "next/navigation";
 import { undoReview, type UndoReviewResult } from "@/lib/actions";
 import type { PendingReviewUndo } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -37,6 +38,7 @@ function readStoredUndo(): PendingReviewUndo | null {
 }
 
 export function ReviewUndoProvider({ children }: { children: ReactNode }) {
+  const router = useRouter();
   const [pendingUndo, setPendingUndo] = useState<PendingReviewUndo | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [undoPending, startUndoTransition] = useTransition();
@@ -88,9 +90,12 @@ export function ReviewUndoProvider({ children }: { children: ReactNode }) {
       const restored = pendingUndo;
       clearUndo();
       window.dispatchEvent(new CustomEvent("recallcode:review-undone", { detail: { pending: restored, result } }));
+      // Server revalidation updates future navigations; refreshing once keeps
+      // whichever private screen is currently open consistent immediately.
+      router.refresh();
       toast.success("Review undone", { description: "The previous card state was restored." });
     });
-  }, [clearUndo, pendingUndo, undoPending]);
+  }, [clearUndo, pendingUndo, router, undoPending]);
 
   const value = useMemo(() => ({ pendingUndo, registerUndo, clearUndo, undoLastReview, undoPending }), [clearUndo, pendingUndo, registerUndo, undoLastReview, undoPending]);
 

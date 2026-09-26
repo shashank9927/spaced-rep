@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import type { DueProblem, PendingReviewUndo, RatingOption } from "@/lib/types";
 import { formatDate, localDateKey } from "@/lib/utils";
 import { useReviewUndo } from "@/components/review-undo-provider";
-import type { UndoReviewResult } from "@/lib/actions";
+import type { ReviewConflictFailure, UndoReviewResult } from "@/lib/actions";
 import { reviewUndoExpiresAt } from "@/lib/review-undo";
 
 type QueueUpdate = DueProblem[] | ((queue: DueProblem[]) => DueProblem[]);
@@ -20,6 +20,7 @@ export function ReviewClient({ initialQueue, optionsByProblem, timezone, todayKe
   const router = useRouter();
   const { registerUndo } = useReviewUndo();
   const [queueState, setQueueState] = useState({ dayKey: todayKey, items: initialQueue });
+  const [ratingOptions, setRatingOptions] = useState(optionsByProblem);
   const queue = queueState.dayKey === todayKey ? queueState.items : initialQueue;
   const setQueue = useCallback((update: QueueUpdate) => setQueueState((state) => {
     const base = state.dayKey === todayKey ? state.items : initialQueue;
@@ -73,7 +74,22 @@ export function ReviewClient({ initialQueue, optionsByProblem, timezone, todayKe
     <div className="mb-5 h-1 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label="Review session progress" aria-valuemin={0} aria-valuemax={initialQueue.length} aria-valuenow={completed}><span className="block h-full bg-primary transition-[width]" style={{ width: `${initialQueue.length ? completed / initialQueue.length * 100 : 100}%` }} /></div>
 
     <article className="overflow-hidden rounded-lg border border-border bg-card"><div className="border-b border-border px-5 py-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">LeetCode #{current.leetcodeNumber} · {dueLabel}</p><h2 className="mt-2 text-2xl font-semibold tracking-[-.025em]">{current.title}</h2><p className="mt-1 text-sm text-muted-foreground">{current.topics.join(" · ")}</p></div><Badge variant={current.difficulty.toLowerCase() as "easy" | "medium" | "hard"}>{current.difficulty}</Badge></div><div className="mt-5 flex flex-wrap gap-2">{current.neetcode_url && <Button asChild><a href={current.neetcode_url} target="_blank" rel="noopener noreferrer">Open on NeetCode <ArrowUpRight size={15} /></a></Button>}{current.leetcode_url && <Button variant="outline" asChild><a href={current.leetcode_url} target="_blank" rel="noopener noreferrer">Open on LeetCode <ArrowUpRight size={15} /></a></Button>}{!hasExternalLink && <span className="flex min-h-10 items-center text-sm text-muted-foreground">External link unavailable · use the problem title or number to find it.</span>}</div></div>
-      <div className="p-5"><div className="mb-5 flex gap-2 rounded-md border border-border bg-muted/50 p-3 text-sm text-muted-foreground"><Lightbulb size={17} className="mt-0.5 shrink-0 text-warning" /><span>Attempt first. If you could not reconstruct the approach, study the solution, then rate what you independently recalled. A rating records learning progress, not submission acceptance.</span></div><ReviewRatingForm problemId={current.id} options={optionsByProblem[current.id]} onComplete={(result) => {
+      <div className="p-5"><div className="mb-5 flex gap-2 rounded-md border border-border bg-muted/50 p-3 text-sm text-muted-foreground"><Lightbulb size={17} className="mt-0.5 shrink-0 text-warning" /><span>Attempt first. If you could not reconstruct the approach, study the solution, then rate what you independently recalled. A rating records learning progress, not submission acceptance.</span></div><ReviewRatingForm problemId={current.id} options={ratingOptions[current.id] ?? optionsByProblem[current.id]} onConflict={(result: ReviewConflictFailure) => {
+        const latestDueKey = localDateKey(new Date(result.latestCard.dueAt), timezone);
+        setRatingOptions((values) => ({ ...values, [current.id]: result.ratingOptions }));
+        if (latestDueKey > currentTodayKey) {
+          setQueue((items) => items.filter((item) => item.id !== current.id));
+          setIndex(0);
+          toast.info("This review was completed in another tab", { description: `The latest schedule is ${formatDate(result.latestCard.dueAt, timezone)}.` });
+          return;
+        }
+        setQueue((items) => items.map((item) => item.id === current.id ? {
+          ...item,
+          latest_rating: result.latestCard.latestRating,
+          latest_reviewed_at: result.latestCard.last_review ?? null,
+          card: { ...item.card, due: result.latestCard.dueAt, due_at: result.latestCard.dueAt, stability: result.latestCard.stability, difficulty: result.latestCard.difficulty, elapsed_days: result.latestCard.elapsed_days, scheduled_days: result.latestCard.scheduled_days, learning_steps: result.latestCard.learning_steps, reps: result.latestCard.reps, lapses: result.latestCard.lapses, state: result.latestCard.state, last_review: result.latestCard.last_review, version: result.latestCard.version, first_attempted_at: result.latestCard.firstAttemptedAt },
+        } : item));
+      }} onComplete={(result) => {
         const restorePosition = currentIndex;
         setQueue((items) => items.filter((item) => item.id !== current.id));
         setIndex(0);

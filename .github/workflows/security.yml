@@ -8,32 +8,83 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  quality:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Scan for committed secrets
-        uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Use Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
-      - name: Install dependencies
-        run: npm ci
-      - name: Audit dependencies
-        run: npm audit --audit-level=moderate
-      - name: Type-check
-        run: npx tsc --noEmit
-      - name: Lint
-        run: npm run lint
-      - name: Test
-        run: npm test
-      - name: Production build
-        run: npm run build
+      - run: npm ci
+      - run: npm audit --audit-level=moderate
+      - run: npx tsc --noEmit
+      - run: npm run lint
+      - run: npm run test:unit
+      - run: npm run build
+
+  database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+      - run: npm ci
+      - run: supabase db start
+      - run: npm run test:db
+      - if: ${{ always() }}
+        run: supabase stop --no-backup
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: supabase/setup-cli@v2
+        with:
+          version: latest
+      - run: npm ci
+      - run: supabase start
+      - name: Export isolated environment
+        shell: bash
+        run: |
+          eval "$(supabase status -o env \
+            --override-name api.url=LOCAL_API_URL \
+            --override-name auth.anon_key=LOCAL_ANON_KEY \
+            --override-name auth.service_role_key=LOCAL_SERVICE_KEY)"
+          echo "NEXT_PUBLIC_SUPABASE_URL=$LOCAL_API_URL" >> "$GITHUB_ENV"
+          echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$LOCAL_ANON_KEY" >> "$GITHUB_ENV"
+          echo "SUPABASE_SERVICE_ROLE_KEY=$LOCAL_SERVICE_KEY" >> "$GITHUB_ENV"
+          echo "E2E_SUPABASE_URL=$LOCAL_API_URL" >> "$GITHUB_ENV"
+          echo "E2E_SUPABASE_ANON_KEY=$LOCAL_ANON_KEY" >> "$GITHUB_ENV"
+          echo "E2E_SUPABASE_SERVICE_ROLE_KEY=$LOCAL_SERVICE_KEY" >> "$GITHUB_ENV"
+          echo "NEXT_PUBLIC_SITE_URL=http://localhost:3000" >> "$GITHUB_ENV"
+          echo "PLAYWRIGHT_BASE_URL=http://localhost:3000" >> "$GITHUB_ENV"
+          echo "BOOTSTRAP_ADMIN_EMAIL=owner@recallcode.test" >> "$GITHUB_ENV"
+      - run: npm run catalog:import
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+      - if: ${{ always() }}
+        run: supabase stop --no-backup

@@ -16,14 +16,41 @@ export type ActionResult = { ok: true; message?: string } | { ok: false; error: 
 export type SaveSettingsResult = { ok: true; message: string; profile: { display_name: string; timezone: string; selected_catalog: (typeof CATALOG_IDS)[number] } } | { ok: false; error: string };
 export type ActionErrorCode = "invalid_input" | "unauthorized" | "conflict" | "rate_limited" | "temporary_failure";
 export type ActionFailure = { ok: false; code: ActionErrorCode; error: string; retryable: boolean };
+export type ReviewConflictFailure = {
+  ok: false;
+  code: "conflict";
+  error: string;
+  retryable: false;
+  latestCard: CompleteUserProblemCard;
+  retrievabilityNow: number;
+  ratingOptions: RatingOption[];
+};
 export type ReviewActionResult = {
   ok: true; reviewLogId: string; eventKind: ReviewEventKind; nextDue: string; reviewedAt: string; retrievabilityNow: number;
   previousIntervalDays: number; newIntervalDays: number; note: string | null; card: CompleteUserProblemCard; ratingOptions: RatingOption[];
-} | (ActionFailure & { conflict?: boolean });
+} | ActionFailure | ReviewConflictFailure;
 export type UndoReviewResult = { ok: true; message: string; problemId: string; card: CompleteUserProblemCard | null; retrievabilityNow: number | null; ratingOptions: RatingOption[] } | ActionFailure;
 
 function reviewFailure(code: ActionErrorCode, error: string): ActionFailure & { conflict?: boolean } {
-  return { ok: false, code, error, retryable: code === "conflict" || code === "rate_limited" || code === "temporary_failure", ...(code === "conflict" ? { conflict: true } : {}) };
+  return { ok: false, code, error, retryable: code === "rate_limited" || code === "temporary_failure", ...(code === "conflict" ? { conflict: true } : {}) };
+}
+
+async function reviewConflictFailure(userId: string, problemId: string, error: string): Promise<ReviewConflictFailure | ActionFailure> {
+  const { data, error: readError } = await createAdminClient().from("user_problem_cards")
+    .select("due_at,stability,difficulty,elapsed_days,scheduled_days,learning_steps,reps,lapses,state,last_review_at,last_rating,version,first_attempted_at")
+    .eq("user_id", userId)
+    .eq("problem_id", problemId)
+    .maybeSingle();
+  if (readError || !data) return reviewFailure("temporary_failure", "This problem changed in another tab, but its latest state could not be loaded. Open it again and retry.");
+  return {
+    ok: false,
+    code: "conflict",
+    error,
+    retryable: false,
+    latestCard: cardResult(problemId, data),
+    retrievabilityNow: retrievability(dbCard(data), new Date()),
+    ratingOptions: ratingOptions(dbCard(data)),
+  };
 }
 
 function classifyActionError(error: unknown): ActionErrorCode {
@@ -107,7 +134,7 @@ type ReviewRpcPayload = {
 };
 
 function reviewResultFromRpc(problemId: string, payload: ReviewRpcPayload): ReviewActionResult {
-  if (!payload.card) return reviewFailure("conflict", "This review was changed before it could be reconciled. Refresh and try again.");
+  if (!payload.card) return reviewFailure("temporary_failure", "The review was saved, but its latest card could not be loaded. Open the problem again.");
   const reviewedAt = payload.reviewed_at;
   const state = dbCard(payload.card);
   return {
@@ -128,14 +155,17 @@ function reviewResultFromRpc(problemId: string, payload: ReviewRpcPayload): Revi
 export async function submitReview(input: SubmitReviewInput): Promise<ReviewActionResult> {
   const parsed = reviewSchema.safeParse(input);
   if (!parsed.success) return reviewFailure("invalid_input", "The review data is invalid. Refresh and try again.");
+  let profile: Profile | null = null;
   try {
-    const profile = await activeProfile();
+    profile = await activeProfile();
+    const profileId = profile.id;
+    const timezone = profile.timezone;
     const supabase = await createClient();
-    const { data: row, error: cardError } = await supabase.from("user_problem_cards").select("due_at,stability,difficulty,elapsed_days,scheduled_days,learning_steps,reps,lapses,state,last_review_at,last_rating,version,first_attempted_at").eq("user_id", profile.id).eq("problem_id", parsed.data.problemId).maybeSingle();
+    const { data: row, error: cardError } = await supabase.from("user_problem_cards").select("due_at,stability,difficulty,elapsed_days,scheduled_days,learning_steps,reps,lapses,state,last_review_at,last_rating,version,first_attempted_at").eq("user_id", profileId).eq("problem_id", parsed.data.problemId).maybeSingle();
     if (cardError) return reviewFailure("temporary_failure", safeErrorMessage(cardError, "We could not load this problem."));
     const now = new Date();
     const current = row ? dbCard(row) : null;
-    const eventKind: ReviewEventKind = !row ? "first_attempt" : isDueOnOrBeforeLocalDay(row.due_at, now, profile.timezone) ? "scheduled_review" : "early_review";
+    const eventKind: ReviewEventKind = !row ? "first_attempt" : isDueOnOrBeforeLocalDay(row.due_at, now, timezone) ? "scheduled_review" : "early_review";
     const next = cardStateForDatabase(scheduleCard(current, parsed.data.rating, now).next);
     const version = (row?.version ?? 0) + 1;
     const firstAttemptedAt = row?.first_attempted_at ?? now.toISOString();
@@ -144,18 +174,22 @@ export async function submitReview(input: SubmitReviewInput): Promise<ReviewActi
     // the exact saved result. That makes safe network retries one round-trip
     // cheaper and removes the old post-save reconciliation query.
     const { data, error } = await measure("review.rpc", () => createAdminClient().rpc("submit_review_result_service", {
-      p_user_id: profile.id, p_problem_id: parsed.data.problemId, p_request_id: parsed.data.requestId, p_rating: parsed.data.rating, p_reviewed_at: now.toISOString(), p_note: parsed.data.note ?? null, p_scheduler_version: SCHEDULER_VERSION, p_event_kind: eventKind, p_previous_due_at: row?.due_at ?? null, p_next_due_at: next.due_at, p_stability: next.stability, p_difficulty: next.difficulty, p_elapsed_days: next.elapsed_days, p_scheduled_days: next.scheduled_days, p_learning_steps: next.learning_steps, p_reps: next.reps, p_lapses: next.lapses, p_state: next.state, p_last_review_at: next.last_review_at, p_first_attempted_at: firstAttemptedAt, p_expected_version: row?.version ?? 0, p_previous_card_state: cardSnapshot(row), p_result_card_state: nextSnapshot, p_result_version: version,
+      p_user_id: profileId, p_problem_id: parsed.data.problemId, p_request_id: parsed.data.requestId, p_rating: parsed.data.rating, p_reviewed_at: now.toISOString(), p_note: parsed.data.note ?? null, p_scheduler_version: SCHEDULER_VERSION, p_event_kind: eventKind, p_previous_due_at: row?.due_at ?? null, p_next_due_at: next.due_at, p_stability: next.stability, p_difficulty: next.difficulty, p_elapsed_days: next.elapsed_days, p_scheduled_days: next.scheduled_days, p_learning_steps: next.learning_steps, p_reps: next.reps, p_lapses: next.lapses, p_state: next.state, p_last_review_at: next.last_review_at, p_first_attempted_at: firstAttemptedAt, p_expected_version: row?.version ?? 0, p_previous_card_state: cardSnapshot(row), p_result_card_state: nextSnapshot, p_result_version: version,
     }));
     if (error) {
       const conflict = error.code === "40001" || error.code === "23505";
-      const code: ActionErrorCode = conflict ? "conflict" : classifyActionError(error);
-      return reviewFailure(code, safeErrorMessage(error, conflict ? "This problem changed in another tab. Reload it, then rate again." : "We could not save this review. Please try again."));
+      if (conflict) return reviewConflictFailure(profileId, parsed.data.problemId, "This problem changed in another tab. Its latest schedule has been loaded; rate it again only if it is still due.");
+      return reviewFailure(classifyActionError(error), safeErrorMessage(error, "We could not save this review. Please try again."));
     }
     // The active review session reconciles from this response, so do not invalidate its
     // route (which would cause a needless second queue fetch).
     revalidatePath("/today"); revalidatePath("/schedule"); revalidatePath("/progress"); revalidatePath("/problems/" + parsed.data.problemId);
     return reviewResultFromRpc(parsed.data.problemId, data as ReviewRpcPayload);
-  } catch (error) { return reviewFailure(classifyActionError(error), safeErrorMessage(error, "We could not save this review. Please try again.")); }
+  } catch (error) {
+    const code = classifyActionError(error);
+    if (code === "conflict" && profile) return reviewConflictFailure(profile.id, parsed.data.problemId, "This problem changed in another tab. Its latest schedule has been loaded; rate it again only if it is still due.");
+    return reviewFailure(code, safeErrorMessage(error, "We could not save this review. Please try again."));
+  }
 }
 
 export async function undoReview(input: { reviewLogId: string; expectedVersion: number }): Promise<UndoReviewResult> {
@@ -222,7 +256,11 @@ export async function loadProblemHistory(input: { problemId: string; before?: st
   }
 }
 
-export async function inviteUser(email: string): Promise<ActionResult> {
+export interface AdminInviteRow { email: string; invited_at: string; claimed_at: string | null; is_active: boolean }
+export type InviteUserResult = { ok: true; message: string; invite: AdminInviteRow } | { ok: false; error: string };
+export type SetUserAccessResult = { ok: true; invite: AdminInviteRow } | { ok: false; error: string };
+
+export async function inviteUser(email: string): Promise<InviteUserResult> {
   const normalized = z.string().trim().email().transform((value) => value.toLowerCase()).safeParse(email);
   if (!normalized.success) return { ok: false, error: "Enter a valid email address." };
   try {
@@ -231,19 +269,26 @@ export async function inviteUser(email: string): Promise<ActionResult> {
     const recent = await admin.from("allowed_emails").select("email", { count: "exact", head: true }).eq("invited_by", profile.id).gte("invited_at", new Date(Date.now() - 3600000).toISOString());
     if (recent.error) return { ok: false, error: safeErrorMessage(recent.error, "We could not check invitation limits.") };
     if ((recent.count ?? 0) >= 20) return { ok: false, error: "Too many invitations were sent recently. Please wait an hour." };
-    const { error } = await admin.from("allowed_emails").upsert({ email: normalized.data, invited_by: profile.id, is_active: true }, { onConflict: "email" });
+    const { data, error } = await admin.from("allowed_emails")
+      .upsert({ email: normalized.data, invited_by: profile.id, is_active: true }, { onConflict: "email" })
+      .select("email,invited_at,claimed_at,is_active")
+      .single();
     if (error) return { ok: false, error: safeErrorMessage(error, "We could not update the invitation.") };
-    revalidatePath("/admin"); return { ok: true, message: normalized.data + " can now sign in with Google." };
+    revalidatePath("/admin"); return { ok: true, message: normalized.data + " can now sign in with Google.", invite: data as AdminInviteRow };
   } catch (error) { return { ok: false, error: safeErrorMessage(error, "We could not update the invitation.") }; }
 }
 
-export async function setUserAccess(email: string, isActive: boolean): Promise<ActionResult> {
+export async function setUserAccess(email: string, isActive: boolean): Promise<SetUserAccessResult> {
   const parsed = z.string().trim().email().transform((value) => value.toLowerCase()).safeParse(email);
   if (!parsed.success) return { ok: false, error: "Invalid email address." };
   try {
     const profile = await activeProfile(); if (profile.role !== "admin") return { ok: false, error: "Only the app owner can manage access." };
-    const { error } = await createAdminClient().from("allowed_emails").update({ is_active: isActive }).eq("email", parsed.data);
+    const { data, error } = await createAdminClient().from("allowed_emails")
+      .update({ is_active: isActive })
+      .eq("email", parsed.data)
+      .select("email,invited_at,claimed_at,is_active")
+      .single();
     if (error) return { ok: false, error: safeErrorMessage(error, "We could not change access.") };
-    revalidatePath("/admin"); return { ok: true };
+    revalidatePath("/admin"); return { ok: true, invite: data as AdminInviteRow };
   } catch (error) { return { ok: false, error: safeErrorMessage(error, "We could not change access.") }; }
 }

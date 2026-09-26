@@ -203,8 +203,9 @@ export async function getTodayData(): Promise<TodayPayload | null> {
   // explicitly so Cache Components streams this work below the page fallback.
   await connection();
   const now = new Date();
-  const [profile, rows, logs] = await Promise.all([getProfile(), readStudyCards(), readAnalyticsLogs(new Date(now.getTime() - 8 * 86_400_000).toISOString())]);
+  const profile = await getProfile();
   if (!profile) return null;
+  const [rows, logs] = await Promise.all([readStudyCards(), readAnalyticsLogs(new Date(now.getTime() - 8 * 86_400_000).toISOString())]);
   const cards = enrichCards(rows, [], now);
   const due = cards.filter((card) => isDueOnOrBeforeLocalDay(card.card.due_at, now, profile.timezone)).sort(queueOrder);
   const upcoming = cards.filter((card) => !isDueOnOrBeforeLocalDay(card.card.due_at, now, profile.timezone)).sort((a, b) => new Date(a.card.due_at).getTime() - new Date(b.card.due_at).getTime()).slice(0, 3);
@@ -215,7 +216,9 @@ export const getDashboardData = getTodayData;
 
 export async function getCatalogProblems(catalogId: CatalogId): Promise<ProblemDeckPayload> {
   await connection();
-  const [rows, cardRows, profile] = await Promise.all([catalogRows(catalogId), readCardSummaries(), getProfile()]);
+  const profile = await getProfile();
+  if (!profile) return { catalogId, todayKey: localDateKey(new Date(), "UTC"), problems: [], activeCount: 0, dueCount: 0 };
+  const [rows, cardRows] = await Promise.all([catalogRows(catalogId), readCardSummaries()]);
   const cards = new Map(cardRows.map((card: any) => [card.problem_id, card]));
   const problems = rows.flatMap((row: any) => {
     if (!row.problems) return [];
@@ -226,16 +229,17 @@ export async function getCatalogProblems(catalogId: CatalogId): Promise<ProblemD
     } : null } satisfies CatalogProblemSummary];
   });
   const now = new Date();
-  const dueCount = profile ? problems.filter((problem) => problem.card && isDueOnOrBeforeLocalDay(problem.card.due_at, now, profile.timezone)).length : 0;
-  return { catalogId, todayKey: profile ? localDateKey(new Date(), profile.timezone) : localDateKey(new Date(), "UTC"), problems, activeCount: problems.filter((problem) => problem.card).length, dueCount };
+  const dueCount = problems.filter((problem) => problem.card && isDueOnOrBeforeLocalDay(problem.card.due_at, now, profile.timezone)).length;
+  return { catalogId, todayKey: localDateKey(new Date(), profile.timezone), problems, activeCount: problems.filter((problem) => problem.card).length, dueCount };
 }
 
 export async function getDueQueue(): Promise<DueQueuePayload> {
   await connection();
-  const [profile, rows] = await Promise.all([getProfile(), readStudyCards()]);
+  const profile = await getProfile();
   const now = new Date();
-  const timezone = profile?.timezone ?? "UTC";
-  return { timezone, todayKey: localDateKey(now, timezone), problems: profile ? enrichCards(rows, [], now).filter((card) => isDueOnOrBeforeLocalDay(card.card.due_at, now, timezone)).sort(queueOrder) : [] };
+  if (!profile) return { timezone: "UTC", todayKey: localDateKey(now, "UTC"), problems: [] };
+  const rows = await readStudyCards();
+  return { timezone: profile.timezone, todayKey: localDateKey(now, profile.timezone), problems: enrichCards(rows, [], now).filter((card) => isDueOnOrBeforeLocalDay(card.card.due_at, now, profile.timezone)).sort(queueOrder) };
 }
 
 function localMonth(now: Date, timezone: string) {
@@ -248,14 +252,12 @@ function localMonth(now: Date, timezone: string) {
 export async function getScheduleAgendaData(): Promise<ScheduleAgendaPayload | null> {
   await connection();
   const now = new Date();
-  // The event range is independent of profile data, so do not make the
-  // calendar wait for a profile/cards round-trip before beginning this read.
-  const [profile, rows, logs] = await Promise.all([
-    getProfile(),
+  const profile = await getProfile();
+  if (!profile) return null;
+  const [rows, logs] = await Promise.all([
     readStudyCards(),
     readLogsInRange(new Date(now.getTime() - 2 * 86_400_000).toISOString(), new Date(now.getTime() + 16 * 86_400_000).toISOString()),
   ]);
-  if (!profile) return null;
   const data = buildScheduleAgenda({ cards: enrichCards(rows, [], now), logs, now, timezone: profile.timezone });
   const [year, numericMonth] = data.todayKey.slice(0, 7).split("-").map(Number);
   const max = new Date(Date.UTC(year, numericMonth + 11, 1));
@@ -270,12 +272,12 @@ export async function getScheduleData(month: string) {
   const gridStart = new Date(first);
   gridStart.setUTCDate(gridStart.getUTCDate() - ((gridStart.getUTCDay() + 6) % 7));
   const now = new Date();
-  const [profile, rows, logs] = await Promise.all([
-    getProfile(),
+  const profile = await getProfile();
+  if (!profile) return null;
+  const [rows, logs] = await Promise.all([
     readStudyCards(),
     readLogsInRange(new Date(gridStart.getTime() - 86_400_000).toISOString(), new Date(gridStart.getTime() + 43 * 86_400_000).toISOString()),
   ]);
-  if (!profile) return null;
   return buildScheduleData({ month, cards: enrichCards(rows, [], now), logs, now, timezone: profile.timezone });
 }
 
@@ -289,15 +291,16 @@ export async function getProblemHistoryPage(problemId: string, before?: string) 
 export async function getProblemDetail(problemId: string) {
   await connection();
   if (!z.string().uuid().safeParse(problemId).success) return null;
+  const profile = await getProfile();
+  if (!profile) return null;
   const supabase = await createClient();
-  const [profile, problemResult, cardResult, logs] = await Promise.all([
-    getProfile(),
+  const [problemResult, cardResult, logs] = await Promise.all([
     measure("problem.read", () => supabase.from("problems").select("id,source_id,leetcode_number,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(position,is_primary,topics(name))").eq("id", problemId).maybeSingle()),
     measure("card.one", () => supabase.from("user_problem_cards").select("due_at,stability,difficulty,elapsed_days,scheduled_days,learning_steps,reps,lapses,state,last_review_at,last_rating,version,first_attempted_at").eq("problem_id", problemId).maybeSingle()),
     getProblemHistoryPage(problemId),
   ]);
   if (problemResult.error || cardResult.error) throw problemResult.error ?? cardResult.error;
-  if (!problemResult.data || !profile) return null;
+  if (!problemResult.data) return null;
   const now = new Date();
   const card = cardResult.data ? (() => {
     const state = toCardState(cardResult.data);
@@ -310,8 +313,9 @@ export async function getProblemDetail(problemId: string) {
 export async function getProgressData(): Promise<ProgressPayload | null> {
   await connection();
   const now = new Date();
-  const [profile, rows, logs] = await Promise.all([getProfile(), readStudyCards(), readAnalyticsLogs(new Date(now.getTime() - 92 * 86_400_000).toISOString())]);
+  const profile = await getProfile();
   if (!profile) return null;
+  const [rows, logs] = await Promise.all([readStudyCards(), readAnalyticsLogs(new Date(now.getTime() - 92 * 86_400_000).toISOString())]);
   const cards = enrichCards(rows, [], now);
   let ninetyDayStart = localDateKey(now, profile.timezone);
   for (let day = 1; day < 90; day += 1) ninetyDayStart = previousDateKey(ninetyDayStart);
@@ -341,6 +345,7 @@ export async function getProgressData(): Promise<ProgressPayload | null> {
 }
 
 export async function getReviewHistory() {
+  if (!await getProfile()) return [];
   return readAnalyticsLogs(new Date(Date.now() - 90 * 86_400_000).toISOString());
 }
 

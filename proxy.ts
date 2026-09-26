@@ -47,7 +47,7 @@ export async function proxy(request: NextRequest) {
   if (process.env.NODE_ENV === "production") {
     const supabaseOrigin = url ? (() => { try { return new URL(url).origin; } catch { return ""; } })() : "";
     const connectSources = ["'self'", supabaseOrigin].filter(Boolean).join(" ");
-    response.headers.set("Content-Security-Policy", [
+    const contentSecurityPolicy = [
       "default-src 'self'",
       `script-src 'self' 'nonce-${nonce}'`,
       "style-src 'self' 'unsafe-inline'",
@@ -61,8 +61,9 @@ export async function proxy(request: NextRequest) {
       "form-action 'self'",
       "frame-ancestors 'none'",
       "object-src 'none'",
-      "upgrade-insecure-requests",
-    ].join("; "));
+    ];
+    if (process.env.NEXT_PUBLIC_SITE_URL?.startsWith("https://")) contentSecurityPolicy.push("upgrade-insecure-requests");
+    response.headers.set("Content-Security-Policy", contentSecurityPolicy.join("; "));
     response.headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
   }
   return response;
