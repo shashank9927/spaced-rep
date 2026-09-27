@@ -8,6 +8,7 @@ const problemSearch = (page: import("@playwright/test").Page) =>
   page.locator("main input[placeholder='Filter by number, title, or pattern']:visible");
 
 async function seedMemberDueReview() {
+  await clearMemberProblem(217);
   const url = process.env.E2E_SUPABASE_URL;
   const serviceKey = process.env.E2E_SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !serviceKey) return;
@@ -36,6 +37,33 @@ async function seedMemberDueReview() {
     version: 1,
   }, { onConflict: "user_id,problem_id" });
   if (card.error) throw card.error;
+}
+
+/**
+ * Browser retries reuse the same isolated database. Make tests which expect a
+ * New problem independent of a previous failed attempt or a prior local run.
+ */
+async function clearMemberProblem(leetcodeNumber: number) {
+  const url = process.env.E2E_SUPABASE_URL;
+  const serviceKey = process.env.E2E_SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) return;
+  const admin = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
+  const users = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  const member = users.data.users.find((user) => user.email === "member@recallcode.test");
+  const problem = await admin.from("problems").select("id").eq("leetcode_number", leetcodeNumber).single();
+  if (users.error || !member || problem.error || !problem.data) throw users.error ?? problem.error ?? new Error("Could not reset the member test problem.");
+
+  const logs = await admin.from("review_logs").select("id").eq("user_id", member.id).eq("problem_id", problem.data.id);
+  if (logs.error) throw logs.error;
+  const logIds = logs.data.map((log) => log.id);
+  if (logIds.length) {
+    const reversals = await admin.from("review_reversals").delete().in("review_log_id", logIds);
+    if (reversals.error) throw reversals.error;
+  }
+  const deletedLogs = await admin.from("review_logs").delete().eq("user_id", member.id).eq("problem_id", problem.data.id);
+  if (deletedLogs.error) throw deletedLogs.error;
+  const deletedCard = await admin.from("user_problem_cards").delete().eq("user_id", member.id).eq("problem_id", problem.data.id);
+  if (deletedCard.error) throw deletedCard.error;
 }
 
 test.beforeEach(({}, testInfo) => {
@@ -69,6 +97,7 @@ test("a selected due review supports keyboard rating and exact Undo", async ({ p
 });
 
 test("first attempt creates progress and Undo restores New", async ({ page }) => {
+  await clearMemberProblem(1);
   await page.goto("/problems");
   await problemSearch(page).fill("Two Sum");
   await page.getByRole("link", { name: /#1 Two Sum/ }).click();
@@ -79,7 +108,10 @@ test("first attempt creates progress and Undo restores New", async ({ page }) =>
   await expect(page.getByText(/Saved — next review/)).toBeVisible();
   await expect(detailSheet.getByText(/First attempt · Good/)).toBeVisible();
   await page.goto("/schedule");
-  await expect(page.getByText("First attempt recorded").first()).toBeVisible();
+  const agenda = page.locator("[data-schedule-agenda]");
+  const attemptDay = agenda.locator('[data-schedule-agenda-day][data-populated="true"]').filter({ hasText: /first attempt/ }).first();
+  await attemptDay.getByRole("button").click();
+  await expect(attemptDay.getByText("First attempt recorded", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   await expect(page.getByText("Review undone", { exact: true })).toBeVisible();
   await page.goto("/problems");
@@ -116,6 +148,7 @@ test("schedule exposes fourteen days and a synchronized month view", async ({ pa
 });
 
 test("personal reset clears study data but keeps the account", async ({ page }) => {
+  await clearMemberProblem(242);
   await page.goto("/problems");
   await problemSearch(page).fill("Valid Anagram");
   await page.getByRole("link", { name: /#242 Valid Anagram/ }).click();
