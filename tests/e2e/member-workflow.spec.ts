@@ -97,11 +97,22 @@ test("filters expose a clear recovery path", async ({ page }) => {
 
 test("schedule exposes fourteen days and a synchronized month view", async ({ page }) => {
   await page.goto("/schedule");
-  const agenda = page.getByRole("heading", { name: "Next 14 days" }).locator("..").locator("..");
-  await expect(agenda.getByRole("button")).toHaveCount(14);
+  const agenda = page.locator("[data-schedule-agenda]");
+  await expect(agenda.locator("[data-schedule-agenda-day]")).toHaveCount(14);
+  const populatedDay = agenda.locator('[data-schedule-agenda-day][data-populated="true"]').first();
+  const details = populatedDay.locator('[role="region"]');
+  await expect(populatedDay.getByRole("button")).toHaveAttribute("aria-expanded", "false");
+  await populatedDay.getByRole("button").click();
+  await expect(populatedDay.getByRole("button")).toHaveAttribute("aria-expanded", "true");
+  await expect(details).toBeVisible();
+  await populatedDay.getByRole("button").click();
+  await expect(details).toBeHidden();
+  await expect(agenda.locator('[data-schedule-agenda-day][data-populated="false"]').first().getByRole("button")).toHaveCount(0);
   await page.getByRole("button", { name: "Month overview" }).click();
-  await expect(page.getByRole("button", { name: "Previous month" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Next month" })).toBeVisible();
+  const month = page.locator("[data-schedule-month]");
+  await expect(month.getByRole("button", { name: "Previous month" })).toBeVisible();
+  await expect(month.getByRole("button", { name: "Next month" })).toBeVisible();
+  await expect(month.locator("[data-schedule-month-detail]")).toBeVisible();
 });
 
 test("personal reset clears study data but keeps the account", async ({ page }) => {
