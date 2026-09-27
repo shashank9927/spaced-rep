@@ -124,7 +124,7 @@ export interface ProgressSummary {
   activeProblemCount: number;
   medianIntervalDays: number | null;
   firstAttemptsThisWeek: number;
-  completedReviewsThisWeek: number;
+  scheduledReviewsThisWeek: number;
   earlyReviewsThisWeek: number;
   activeStudyDaysThisWeek: number;
   scheduledRecallRate: number | null;

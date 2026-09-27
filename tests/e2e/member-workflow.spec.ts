@@ -132,7 +132,7 @@ test("personal reset clears study data but keeps the account", async ({ page }) 
   await problemSearch(page).fill("Valid Anagram");
   await expect(page.getByRole("link", { name: /#242 Valid Anagram/ })).toContainText("New");
   await page.goto("/progress");
-  await expect(page.locator("main h2:has-text('Your learning data starts with one attempt.'):visible")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Review load" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Review outcomes" })).toBeVisible();
+  await expect(page.locator("main h2:has-text('Your learning history starts with one attempt.'):visible")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Review load" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Scheduled review outcomes" })).toHaveCount(0);
 });

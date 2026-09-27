@@ -92,7 +92,7 @@ describe("study analytics", () => {
       { id: "early", problem_id: card().id, rating: "again", reviewed_at: "2026-09-24T08:00:00.000Z", note: null, previous_due_at: "2026-09-25T08:00:00.000Z", next_due_at: "2026-09-25T08:00:00.000Z", scheduled_days: 1, event_kind: "early_review" },
     ];
     const summary = progressSummary([card()], logs, "Europe/Berlin", new Date("2026-09-24T12:00:00.000Z"));
-    expect(summary).toMatchObject({ firstAttemptsThisWeek: 1, completedReviewsThisWeek: 1, earlyReviewsThisWeek: 1, activeStudyDaysThisWeek: 3, scheduledRecallSampleSize: 1, scheduledRecallRate: null });
+    expect(summary).toMatchObject({ firstAttemptsThisWeek: 1, scheduledReviewsThisWeek: 1, earlyReviewsThisWeek: 1, activeStudyDaysThisWeek: 3, scheduledRecallSampleSize: 1, scheduledRecallRate: null });
   });
 
   it("builds a 52-week activity grid with local calendar days and excludes future cells from totals", () => {

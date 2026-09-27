@@ -68,7 +68,7 @@ export function progressSummary(cards: StudyCard[], logs: ReviewLogSummary[], ti
     activeProblemCount: cards.length,
     medianIntervalDays: median(cards.map((card) => card.card.scheduled_days).filter((days) => days > 0)),
     firstAttemptsThisWeek: attempts,
-    completedReviewsThisWeek: reviews,
+    scheduledReviewsThisWeek: reviews,
     earlyReviewsThisWeek: earlyReviews,
     activeStudyDaysThisWeek,
     scheduledRecallRate: scheduled.length >= 20 ? successful / scheduled.length : null,
