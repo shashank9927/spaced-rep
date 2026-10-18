@@ -47,6 +47,11 @@
     "ts-fsrs": "^5.4.2",
     "zod": "^3.24.2"
   },
+  "overrides": {
+    "@next/eslint-plugin-next": {
+      "fast-glob": "$fast-glob"
+    }
+  },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4.3.3",
@@ -55,6 +60,7 @@
     "@types/react-dom": "^19.0.2",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.3.6",
+    "fast-glob": "file:tooling/next-eslint-glob",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.7.2",
     "vitest": "^4.1.11"
