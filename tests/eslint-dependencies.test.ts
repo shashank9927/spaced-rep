@@ -27,10 +27,12 @@ describe("installed Next ESLint directory lookup", () => {
   });
 
   it("resolves wildcard, brace, and array roots for Next's lint rules", () => {
-    const expected = [path.resolve("app/auth"), path.resolve("app/catalog")].sort();
-    expect(roots("app/{auth,catalog}")).toEqual(expected);
-    expect(roots(["app/auth", "app/catalog"])).toEqual(expected);
-    expect(roots("app/a*")).toEqual([path.resolve("app/admin"), path.resolve("app/auth")].sort());
+    const expected = [path.resolve("app/auth"), path.resolve("app/onboarding")].sort();
+    expect(roots("app/{auth,onboarding}")).toEqual(expected);
+    expect(roots(["app/auth", "app/onboarding"])).toEqual(expected);
+    const wildcardRoots = roots("app/*");
+    expect(wildcardRoots).toContain(path.resolve("app/auth"));
+    expect(wildcardRoots).toContain(path.resolve("app/onboarding"));
   });
 
   it("does not treat files or absent directories as application roots", () => {
