@@ -3,9 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 export async function proxy(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
-  const nonce = crypto.randomUUID().replaceAll("-", "");
   const requestId = crypto.randomUUID();
-  requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("x-request-id", requestId);
   requestHeaders.set("x-route", request.nextUrl.pathname);
   let response = NextResponse.next({ request: { headers: requestHeaders } });
@@ -49,7 +47,12 @@ export async function proxy(request: NextRequest) {
     const connectSources = ["'self'", supabaseOrigin].filter(Boolean).join(" ");
     const contentSecurityPolicy = [
       "default-src 'self'",
-      `script-src 'self' 'nonce-${nonce}'`,
+      // Cache Components and Partial Prerendering stream framework bootstrap
+      // scripts into the static shell. A per-request nonce cannot be attached
+      // to those scripts, so a nonce-only policy blocks Next's React streaming
+      // runtime and leaves `$RC` undefined on client navigation. Keep the
+      // performance architecture and use Next's supported static CSP shape.
+      "script-src 'self' 'unsafe-inline'",
       "style-src 'self' 'unsafe-inline'",
       "style-src-attr 'unsafe-inline'",
       `connect-src ${connectSources}`,

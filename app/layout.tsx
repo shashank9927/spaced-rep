@@ -12,8 +12,7 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  // A same-origin external bootstrap remains compatible with the strict CSP
-  // without making the root layout wait for request headers. This lets the
-  // static application shell be prefetched under Cache Components.
+  // Keep this bootstrap same-origin so it works with the static CSP used by
+  // Cache Components and the prefetched application shell.
   return <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable}`} data-theme="dark" suppressHydrationWarning><head><Script id="recallcode-theme-init" src="/theme-init.js" strategy="beforeInteractive" /></head><body>{children}<Analytics /></body></html>;
 }
