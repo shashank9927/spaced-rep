@@ -33,6 +33,10 @@ for (const [width, height] of [[1440, 900], [1024, 768], [768, 1024], [390, 844]
       await expect(page.getByRole("heading", { name: "Scheduled review outcomes", exact: true })).toBeVisible();
       await expect(page.getByRole("table", { name: "Scheduled review outcomes by local calendar week", includeHidden: true })).toBeAttached();
       await expect(page.getByRole("table", { name: "Review load for the next fourteen local days", includeHidden: true })).toBeAttached();
+      await expect(page.getByRole("table", { name: "Days with recorded study activity", includeHidden: true })).toBeAttached();
+      // Check after lazy chart hydration too: table intrinsic sizing can escape a
+      // clipped table itself, so accessible equivalents need a clipped wrapper.
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
       await testInfo.attach("populated-progress", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
       await page.goto("/problems");
       await page.locator("main input[placeholder='Filter by number, title, or pattern']:visible").fill("Contains Duplicate");

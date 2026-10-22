@@ -58,7 +58,7 @@ export function ReviewLoadChart({ data }: { data: ReviewLoadPayload }) {
         </ChartContainer>
       </div></div>
       <div className="border-t border-border px-4 py-2 text-xs text-muted-foreground sm:px-5">Remaining reviews are shown for today; future bars show scheduled reviews. Overdue reviews stay separate.</div>
-      <table className="sr-only"><caption>Review load for the next fourteen local days</caption><thead><tr><th>Date</th><th>Completed today</th><th>Remaining today</th><th>Future reviews due</th></tr></thead><tbody>{load.map((day) => <tr key={day.dateKey}><td>{day.fullLabel}</td><td>{day.completed}</td><td>{day.remaining}</td><td>{day.future}</td></tr>)}</tbody></table>
+      <div className="sr-only"><table><caption>Review load for the next fourteen local days</caption><thead><tr><th>Date</th><th>Completed today</th><th>Remaining today</th><th>Future reviews due</th></tr></thead><tbody>{load.map((day) => <tr key={day.dateKey}><td>{day.fullLabel}</td><td>{day.completed}</td><td>{day.remaining}</td><td>{day.future}</td></tr>)}</tbody></table></div>
     </>}
   </section>;
 }
@@ -87,7 +87,7 @@ export function ReviewOutcomesChart({ outcomes }: { outcomes: RecallOutcomeWeek[
       </ChartContainer>
     </div></div>
     <p className="border-t border-border px-4 py-2 text-xs text-muted-foreground sm:px-5">Weekly percentages appear in tooltips only with at least five reviews. Scheduled Recall above is the more stable 90-day signal.</p>
-    <table className="sr-only"><caption>Scheduled review outcomes by local calendar week</caption><thead><tr><th>Week beginning</th><th>Recalled</th><th>Forgot</th><th>Sample size</th><th>Recall rate</th></tr></thead><tbody>{visibleOutcomes.map((week) => <tr key={week.weekKey}><td>{week.label}</td><td>{week.recalledCount}</td><td>{week.forgotCount}</td><td>{week.sampleSize}</td><td>{week.sampleSize >= 5 && week.recallRate !== null ? `${Math.round(week.recallRate * 100)}%` : "Not emphasized: fewer than five reviews"}</td></tr>)}</tbody></table>
+    <div className="sr-only"><table><caption>Scheduled review outcomes by local calendar week</caption><thead><tr><th>Week beginning</th><th>Recalled</th><th>Forgot</th><th>Sample size</th><th>Recall rate</th></tr></thead><tbody>{visibleOutcomes.map((week) => <tr key={week.weekKey}><td>{week.label}</td><td>{week.recalledCount}</td><td>{week.forgotCount}</td><td>{week.sampleSize}</td><td>{week.sampleSize >= 5 && week.recallRate !== null ? `${Math.round(week.recallRate * 100)}%` : "Not emphasized: fewer than five reviews"}</td></tr>)}</tbody></table></div>
   </section>;
 }
 

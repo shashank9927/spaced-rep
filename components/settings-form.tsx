@@ -1,5 +1,7 @@
 "use client";
 
+import { timezoneOptions } from "@/lib/timezones";
+
 import * as Dialog from "@radix-ui/react-dialog";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -26,7 +28,7 @@ export function SettingsForm({ displayName, timezone, selectedCatalog }: { displ
   const [resetMessage, setResetMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [resetPending, startResetTransition] = useTransition();
-  const zones = Array.from(new Set([timezone, ...(typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [])]));
+  const zones = timezoneOptions(timezone);
 
   const save = () => startTransition(async () => {
     setMessage(null);

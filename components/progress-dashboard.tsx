@@ -119,7 +119,7 @@ function ActivityHeatmap({ days, activeDays, totalEvents, todayKey }: { days: Ac
         })}</div>
       </div>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 font-mono text-[9px] text-muted-foreground"><span>Past year · newest week at right</span><span className="flex items-center gap-1.5"><span>Less</span>{[0, 1, 2, 3, 4].map((level) => <i key={level} className={`activity-cell activity-level-${level}`} />)}<span>More</span></span></div>
-    </div></div><table className="sr-only"><caption>Days with recorded study activity</caption><thead><tr><th>Date</th><th>First attempts</th><th>Scheduled reviews</th><th>Early reviews</th></tr></thead><tbody>{activeEntries.map((day) => <tr key={day.key}><td>{day.key}</td><td>{day.attempts}</td><td>{day.scheduled}</td><td>{day.early}</td></tr>)}</tbody></table></>}
+    </div></div><div className="sr-only"><table><caption>Days with recorded study activity</caption><thead><tr><th>Date</th><th>First attempts</th><th>Scheduled reviews</th><th>Early reviews</th></tr></thead><tbody>{activeEntries.map((day) => <tr key={day.key}><td>{day.key}</td><td>{day.attempts}</td><td>{day.scheduled}</td><td>{day.early}</td></tr>)}</tbody></table></div></>}
   </section>;
 }
 
