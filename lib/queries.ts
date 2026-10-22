@@ -12,13 +12,14 @@ import { retrievability, SCHEDULER_PRESENTATION } from "@/lib/scheduler";
 import { createAdminClient, createClient } from "@/lib/supabase/server";
 import { leetcodeNumberFromSourceId, localDateKey } from "@/lib/utils";
 import { isAllowedExternalUrl } from "@/lib/security";
+import { decodeHistoryCursor, encodeHistoryCursor, readAllPages } from "@/lib/pagination";
 import type { CatalogId, CatalogProblemSummary, DueProblem, DueQueuePayload, FsrsCardState, ProblemDeckPayload, ProblemSummary, ProgressPayload, ReviewLogSummary, ReviewRating, ScheduleAgendaPayload, TodayPayload } from "@/lib/types";
 
 const CARD_SELECT = "due_at,stability,difficulty,elapsed_days,scheduled_days,learning_steps,reps,lapses,state,last_review_at,last_rating,version,first_attempted_at,problems(id,source_id,leetcode_number,slug,title,difficulty,leetcode_url,neetcode_url,problem_topics(position,is_primary,topics(name)))";
 const CARD_SUMMARY_SELECT = "problem_id,due_at,reps,last_review_at,last_rating,lapses,scheduled_days,first_attempted_at";
 const ANALYTICS_LOG_SELECT = "id,problem_id,rating,reviewed_at,previous_due_at,next_due_at,scheduled_days,event_kind,result_version,review_reversals(reversed_at)";
 const HISTORY_LOG_SELECT = "id,problem_id,rating,reviewed_at,note,previous_due_at,next_due_at,scheduled_days,event_kind,result_version,review_reversals(reversed_at),problems(title,difficulty,source_id,leetcode_number)";
-const SCHEDULE_LOG_SELECT = "problem_id,reviewed_at,previous_due_at,event_kind,review_reversals(reversed_at),problems(title,difficulty,source_id,leetcode_number)";
+const SCHEDULE_LOG_SELECT = "id,problem_id,reviewed_at,previous_due_at,event_kind,review_reversals(reversed_at),problems(title,difficulty,source_id,leetcode_number)";
 const CATALOG_SELECT = "sort_order,problems(id,source_id,leetcode_number,title,difficulty,problem_topics(position,is_primary,topics(name)))";
 
 type CardRow = Record<string, any>;
@@ -119,67 +120,55 @@ function enrichCards(rows: CardRow[], logs: ReviewLogSummary[] = [], now = new D
 
 const readStudyCards = cache(async () => {
   const supabase = await createClient();
-  const { data, error } = await measure("cards.read", () => supabase.from("user_problem_cards").select(CARD_SELECT));
-  if (error) throw error;
-  return data ?? [];
+  return readAllPages<any>((offset, size) => measure("cards.read", () => supabase.from("user_problem_cards").select(CARD_SELECT).order("problem_id").range(offset, offset + size - 1)));
 });
 
 const readCardSummaries = cache(async () => {
   const supabase = await createClient();
-  const { data, error } = await measure("cards.summary", () => supabase.from("user_problem_cards").select(CARD_SUMMARY_SELECT));
-  if (error) throw error;
-  return data ?? [];
+  return readAllPages<any>((offset, size) => measure("cards.summary", () => supabase.from("user_problem_cards").select(CARD_SUMMARY_SELECT).order("problem_id").range(offset, offset + size - 1)));
 });
 
 const readAnalyticsLogs = cache(async (since: string) => {
   const supabase = await createClient();
-  const rows: any[] = [];
-  const pageSize = 500;
-  for (let offset = 0; ; offset += pageSize) {
-    const { data, error } = await measure("logs.analytics", () => supabase.from("review_logs").select(ANALYTICS_LOG_SELECT).gte("reviewed_at", since).order("reviewed_at", { ascending: false }).range(offset, offset + pageSize - 1), { offset, pageSize });
-    if (error) throw error;
-    rows.push(...(data ?? []));
-    if ((data?.length ?? 0) < pageSize) break;
-  }
+  const rows = await readAllPages<any>((offset, size) => measure("logs.analytics", () => supabase.from("review_logs").select(ANALYTICS_LOG_SELECT).gte("reviewed_at", since).order("reviewed_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + size - 1)));
   return mapLogs(rows);
 });
 
 const readLogsForProblem = cache(async (problemId: string, before?: string) => {
   const supabase = await createClient();
-  const raw: any[] = [];
-  let cursor = before;
+  const active: ReviewLogSummary[] = [];
+  let cursor = decodeHistoryCursor(before);
   // Reversed events remain in the audit table but must not consume an active
   // history slot. Pull enough rows to return a full, active page whenever one
   // exists without loading the user's entire history.
-  while (raw.length < 100) {
-    let query = supabase.from("review_logs").select(HISTORY_LOG_SELECT).eq("problem_id", problemId).order("reviewed_at", { ascending: false }).limit(25);
-    if (cursor) query = query.lt("reviewed_at", cursor);
+  while (active.length < 21) {
+    let query = supabase.from("review_logs").select(HISTORY_LOG_SELECT).eq("problem_id", problemId).order("reviewed_at", { ascending: false }).order("id", { ascending: false }).limit(100);
+    if (cursor?.id) query = query.or(`reviewed_at.lt.${cursor.reviewedAt},and(reviewed_at.eq.${cursor.reviewedAt},id.lt.${cursor.id})`);
+    else if (cursor?.reviewedAt) query = query.lt("reviewed_at", cursor.reviewedAt);
     const { data, error } = await measure("logs.problem", () => query, { pageSize: 25 });
     if (error) throw error;
     const page = data ?? [];
-    raw.push(...page);
-    if (page.length < 25) break;
-    cursor = page.at(-1)?.reviewed_at;
-    if (!cursor) break;
+    active.push(...mapLogs(page).filter((log) => !log.reversed_at));
+    if (page.length < 100) break;
+    const last = page.at(-1);
+    if (!last) break;
+    cursor = { reviewedAt: last.reviewed_at, id: last.id };
   }
-  return mapLogs(raw).filter((log) => !log.reversed_at);
+  return active;
 });
 
 const readLogsInRange = cache(async (start: string, endExclusive: string) => {
   const supabase = await createClient();
   // Schedule needs only event timing and a display label. Never ship private
   // notes or full review history just to paint calendar entries.
-  const { data, error } = await measure("logs.range", () => supabase.from("review_logs").select(SCHEDULE_LOG_SELECT).gte("reviewed_at", start).lt("reviewed_at", endExclusive).order("reviewed_at", { ascending: false }));
-  if (error) throw error;
+  const data = await readAllPages<any>((offset, size) => measure("logs.range", () => supabase.from("review_logs").select(SCHEDULE_LOG_SELECT).gte("reviewed_at", start).lt("reviewed_at", endExclusive).order("reviewed_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + size - 1)));
   return mapLogs(data ?? []);
 });
 
 function cachedCatalogRows(catalogId: CatalogId) {
   return unstable_cache(async () => {
     const supabase = createAdminClient();
-    const { data, error } = await measure("catalog.shared", () => supabase.from("catalog_problems").select(CATALOG_SELECT).eq("catalog_slug", catalogId).order("sort_order"), { catalogId });
-    if (error) throw error;
-    return data ?? [];
+    return readAllPages<any>((offset, size) => measure("catalog.shared", () => supabase.from("catalog_problems").select(CATALOG_SELECT).eq("catalog_slug", catalogId).order("sort_order").order("problem_id").range(offset, offset + size - 1), { catalogId }));
   }, ["catalog-summary", catalogId], { revalidate: 21_600, tags: [`catalog:${catalogId}`] })();
 }
 
@@ -285,7 +274,7 @@ export async function getProblemHistoryPage(problemId: string, before?: string) 
   if (!z.string().uuid().safeParse(problemId).success) return { entries: [], nextCursor: null };
   const logs = await readLogsForProblem(problemId, before);
   const entries = logs.slice(0, 20);
-  return { entries, nextCursor: logs.length > 20 ? entries.at(-1)?.reviewed_at ?? null : null };
+  return { entries, nextCursor: logs.length > 20 ? encodeHistoryCursor(entries[entries.length - 1]) : null };
 }
 
 export async function getProblemDetail(problemId: string) {

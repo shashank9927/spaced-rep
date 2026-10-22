@@ -8,3 +8,7 @@ export function reviewUndoExpiresAt(reviewedAt: string | number | Date) {
 export function isReviewUndoAvailable(expiresAt: number, now = Date.now()) {
   return Number.isFinite(expiresAt) && expiresAt > now;
 }
+
+export function shouldKeepReviewUndo(expiresAt: number, failure: { retryable: boolean }, now = Date.now()) {
+  return failure.retryable && isReviewUndoAvailable(expiresAt, now);
+}

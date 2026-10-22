@@ -1,24 +1,25 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
+import { isolatedTestEnvironment } from "./environment";
 
-type TestIdentity = { email: string; password: string; role: "admin" | "member"; active: boolean; file: string };
+type TestIdentity = { email: string; password: string; role: "admin" | "member"; active: boolean; file: string; onboarding?: boolean };
 const identities: TestIdentity[] = [
   { email: "owner@recallcode.test", password: "RecallCode-owner-2026!", role: "admin", active: true, file: "admin.json" },
   { email: "member@recallcode.test", password: "RecallCode-member-2026!", role: "member", active: true, file: "member.json" },
   { email: "mobile@recallcode.test", password: "RecallCode-mobile-2026!", role: "member", active: true, file: "mobile.json" },
   { email: "disabled@recallcode.test", password: "RecallCode-disabled-2026!", role: "member", active: false, file: "disabled.json" },
+  { email: "onboarding@recallcode.test", password: "RecallCode-onboarding-2026!", role: "member", active: true, file: "onboarding.json", onboarding: true },
 ];
 
 export default async function globalSetup() {
   await mkdir(".playwright/auth", { recursive: true });
-  const url = process.env.E2E_SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.E2E_SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-  const serviceKey = process.env.E2E_SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!process.env.E2E_SUPABASE_URL || !url || !anonKey || !serviceKey) {
+  const environment = isolatedTestEnvironment();
+  if (!environment) {
     await Promise.all(identities.map((identity) => writeState(identity.file, [])));
     return;
   }
+  const { url, anonKey, serviceKey } = environment;
 
   const admin = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
   // This row is created by the Admin browser test. Remove it first so a prior
@@ -45,7 +46,7 @@ export default async function globalSetup() {
     userIds.set(identity.email, userId);
     const { error: inviteError } = await admin.from("allowed_emails").upsert({ email: identity.email, claimed_by: userId, claimed_at: new Date().toISOString(), is_active: identity.active }, { onConflict: "email" });
     if (inviteError) throw inviteError;
-    const { error: profileError } = await admin.from("profiles").upsert({ id: userId, email: identity.email, display_name: identity.email.split("@")[0], timezone: "Europe/Berlin", selected_catalog: "neetcode150", role: identity.role, is_active: identity.active, onboarding_completed_at: new Date().toISOString() }, { onConflict: "id" });
+    const { error: profileError } = await admin.from("profiles").upsert({ id: userId, email: identity.email, display_name: identity.onboarding ? null : identity.email.split("@")[0], timezone: "Europe/Berlin", selected_catalog: "neetcode150", role: identity.role, is_active: identity.active, onboarding_completed_at: identity.onboarding ? null : new Date().toISOString() }, { onConflict: "id" });
     if (profileError) throw profileError;
     await writeState(identity.file, await sessionCookies(url, anonKey, identity.email, identity.password));
   }

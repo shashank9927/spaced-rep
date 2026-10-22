@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { undoReview, type UndoReviewResult } from "@/lib/actions";
 import type { PendingReviewUndo } from "@/lib/types";
 import { Button } from "@/components/ui/button";
-import { isReviewUndoAvailable } from "@/lib/review-undo";
+import { isReviewUndoAvailable, shouldKeepReviewUndo } from "@/lib/review-undo";
 
 const STORAGE_KEY = "recallcode:pending-review-undo";
 
@@ -81,9 +81,16 @@ export function ReviewUndoProvider({ children }: { children: ReactNode }) {
   const undoLastReview = useCallback(() => {
     if (!pendingUndo || undoPending) return;
     startUndoTransition(async () => {
-      const result: UndoReviewResult = await undoReview({ reviewLogId: pendingUndo.reviewLogId, expectedVersion: pendingUndo.expectedVersion });
+      let result: UndoReviewResult;
+      try {
+        result = await undoReview({ reviewLogId: pendingUndo.reviewLogId, expectedVersion: pendingUndo.expectedVersion });
+      } catch {
+        if (!isReviewUndoAvailable(pendingUndo.expiresAt)) clearUndo();
+        toast.error("Could not reach the server. Your Undo is still available; try again.");
+        return;
+      }
       if (!result.ok) {
-        clearUndo();
+        if (!shouldKeepReviewUndo(pendingUndo.expiresAt, result)) clearUndo();
         toast.error(result.error);
         return;
       }

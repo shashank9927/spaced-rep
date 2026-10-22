@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activityForWeeks, activityLevel, activitySummaryForDays, attentionProblems, isStrong, isWeak, progressSummary, queueOrder, recallOutcomesForWeeks, reviewLoadForCards } from "@/lib/analytics";
+import { activityForWeeks, activityLevel, activitySummaryForDays, attentionProblems, isStrong, isWeak, progressSummary, queueOrder, recallOutcomesForWeeks, reviewLoadForCards, median, patternSignals } from "@/lib/analytics";
 import type { StudyCard } from "@/lib/analytics";
 import type { ReviewLogSummary } from "@/lib/types";
 
@@ -14,6 +14,20 @@ function card(overrides: Partial<StudyCard> = {}): StudyCard {
 }
 
 describe("study analytics", () => {
+  it("uses only the primary pattern and sorts actionable pattern signals", () => {
+    const a = card({ primaryTopic: "Primary", topics: ["Secondary", "Primary"] });
+    const b = card({ id: "second", primaryTopic: "Primary", latest_rating: "hard" });
+    const c = card({ id: "third", primaryTopic: "Single" });
+    const result = patternSignals([a, b, c], new Date("2026-09-24T12:00:00Z"), "UTC");
+    expect(result).toEqual([{ name: "Primary", activeCount: 2, dueCount: 2, reinforcementCount: 1, medianIntervalDays: 3 }]);
+    expect(median([])).toBeNull();
+    expect(median([9, 1, 3, 5])).toBe(4);
+  });
+  it("does not display a recall percentage until 20 scheduled reviews", () => {
+    const logs: ReviewLogSummary[] = Array.from({ length: 20 }, (_, index) => ({ id: String(index), problem_id: card().id, rating: index % 2 ? "hard" : "again", reviewed_at: "2026-09-24T10:00:00Z", note: null, previous_due_at: null, next_due_at: "2026-09-25T10:00:00Z", scheduled_days: 1, event_kind: "scheduled_review" }));
+    expect(progressSummary([], logs.slice(0, 19), "UTC", new Date("2026-09-24T12:00:00Z")).scheduledRecallRate).toBeNull();
+    expect(progressSummary([], logs, "UTC", new Date("2026-09-24T12:00:00Z")).scheduledRecallRate).toBe(.5);
+  });
   it("classifies strong and weak cards from FSRS data and latest rating", () => {
     expect(isStrong(card({ retrievability: .92, card: { ...card().card, stability: 31 } }))).toBe(true);
     expect(isWeak(card({ retrievability: .96, latest_rating: "hard" }))).toBe(true);

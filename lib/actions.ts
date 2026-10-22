@@ -11,6 +11,7 @@ import { safeErrorMessage, safeNoteSchema, timezoneSchema } from "@/lib/security
 import { isDueOnOrBeforeLocalDay } from "@/lib/study-plan";
 import { getCatalogSearchIndex, getProblemHistoryPage } from "@/lib/queries";
 import { measure } from "@/lib/performance";
+import { decodeHistoryCursor } from "@/lib/pagination";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
 export type SaveSettingsResult = { ok: true; message: string; profile: { display_name: string; timezone: string; selected_catalog: (typeof CATALOG_IDS)[number] } } | { ok: false; error: string };
@@ -245,8 +246,9 @@ export async function getSearchIndex(): Promise<Array<{ type: "problem" | "patte
 }
 
 export async function loadProblemHistory(input: { problemId: string; before?: string }) {
-  const parsed = z.object({ problemId: z.string().uuid(), before: z.string().datetime().optional() }).safeParse(input);
+  const parsed = z.object({ problemId: z.string().uuid(), before: z.string().max(512).optional() }).safeParse(input);
   if (!parsed.success) return { ok: false as const, error: "The history cursor is invalid." };
+  try { decodeHistoryCursor(parsed.data.before); } catch { return { ok: false as const, error: "The history cursor is invalid." }; }
   try {
     await activeProfile();
     const page = await getProblemHistoryPage(parsed.data.problemId, parsed.data.before);

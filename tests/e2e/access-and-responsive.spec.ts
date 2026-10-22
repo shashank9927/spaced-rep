@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./test";
 
 test("disabled membership is rejected on its next request", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "disabled" || !process.env.E2E_SUPABASE_URL);

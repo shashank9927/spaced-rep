@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./test";
 import { createClient } from "@supabase/supabase-js";
 
 // Route transitions can retain an outgoing tree briefly for animation and
@@ -66,12 +66,22 @@ async function clearMemberProblem(leetcodeNumber: number) {
   if (deletedCard.error) throw deletedCard.error;
 }
 
-test.beforeEach(({}, testInfo) => {
+test.beforeEach(async ({}, testInfo) => {
   test.skip(testInfo.project.name !== "member");
   test.skip(!process.env.E2E_SUPABASE_URL, "Authenticated tests require the isolated Supabase test stack.");
+  // Each journey starts with the same data, including after Playwright retries.
+  const admin = createClient(process.env.E2E_SUPABASE_URL!, process.env.E2E_SUPABASE_SERVICE_ROLE_KEY!);
+  const users = await admin.auth.admin.listUsers();
+  const member = users.data.users.find((user) => user.email === "member@recallcode.test");
+  if (users.error || !member) throw users.error ?? new Error("Member fixture missing.");
+  const reset = await admin.rpc("reset_study_progress_service", { p_user_id: member.id });
+  if (reset.error) throw reset.error;
+  const profile = await admin.from("profiles").update({ selected_catalog: "neetcode150", timezone: "Europe/Berlin", display_name: "member" }).eq("id", member.id);
+  if (profile.error) throw profile.error;
+  await seedMemberDueReview();
 });
 
-test.describe.configure({ mode: "serial" });
+test.describe.configure({ mode: "default" });
 
 test("primary navigation preserves the application shell", async ({ page }) => {
   await page.goto("/today");
@@ -125,6 +135,65 @@ test("filters expose a clear recovery path", async ({ page }) => {
   await expect(page.getByText(/No problems match/)).toBeVisible();
   await page.getByRole("button", { name: "Reset all" }).click();
   await expect(page.getByText(/No problems match/)).toBeHidden();
+});
+
+for (const rating of ["Forgot", "Hard", "Good", "Easy"]) {
+  test(`first attempt with ${rating} creates a scheduled card`, async ({ page }) => {
+    await clearMemberProblem(1);
+    await page.goto("/problems");
+    await problemSearch(page).fill("Two Sum");
+    await page.getByRole("link", { name: /#1 Two Sum/ }).click();
+    const detail = page.getByRole("dialog", { name: "Two Sum" });
+    const external = detail.getByRole("link", { name: "Open on LeetCode" });
+    await expect(external).toHaveAttribute("href", /^https:\/\/leetcode\.com\//);
+    await expect(detail.getByText("New", { exact: true })).toBeVisible();
+    await detail.getByRole("button", { name: "Record first attempt" }).click();
+    await detail.getByRole("button", { name: new RegExp(`^${rating} `) }).click();
+    await expect(detail.getByText(`First attempt · ${rating}`, { exact: true })).toBeVisible();
+    await expect(detail.getByText(/Saved — next review/)).toBeVisible();
+    await expect(detail.getByRole("button", { name: "Record first attempt" })).toHaveCount(0);
+    await detail.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Review early" }).click();
+    await detail.getByRole("button", { name: /^Good / }).click();
+    await expect(detail.getByText("Early review · Good", { exact: true })).toBeVisible();
+  });
+}
+
+test("temporary save and Undo failures preserve safe retry state", async ({ page }) => {
+  await page.goto("/today");
+  await page.locator("main a[href^='/review?problem=']:visible").first().click();
+  await expect(page.getByRole("heading", { name: "Contains Duplicate" })).toBeVisible();
+  const abortAction = async (route: import("@playwright/test").Route) => {
+    if (route.request().method() === "POST" && route.request().headers()["next-action"]) await route.abort("failed");
+    else await route.continue();
+  };
+  await page.route("**/*", abortAction);
+  await page.keyboard.press("3");
+  await expect(page.getByText(/Could not reach the server/)).toBeVisible();
+  await page.unroute("**/*", abortAction);
+  await page.keyboard.press("3");
+  await expect(page.getByText("Review saved", { exact: true })).toBeVisible();
+  await page.route("**/*", abortAction);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(page.getByText(/Could not reach the server/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeVisible();
+  await page.unroute("**/*", abortAction);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Contains Duplicate" })).toBeVisible();
+});
+
+test("settings synchronizes profile and preserves cards when the catalog changes", async ({ page }) => {
+  await page.goto("/settings");
+  await page.getByLabel("Display name", { exact: true }).fill("Browser Member");
+  await page.getByLabel("Timezone", { exact: true }).selectOption("Asia/Kolkata");
+  await page.getByRole("button", { name: /NeetCode 250/ }).click();
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Settings saved.", { exact: true })).toBeVisible();
+  await page.goto("/today");
+  await expect(page.getByText("Contains Duplicate", { exact: true })).toBeVisible();
+  await page.goto("/settings");
+  await expect(page.getByLabel("Display name", { exact: true })).toHaveValue("Browser Member");
+  await expect(page.getByLabel("Timezone", { exact: true })).toHaveValue("Asia/Kolkata");
 });
 
 test("schedule exposes fourteen days and a synchronized month view", async ({ page }) => {

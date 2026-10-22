@@ -11,6 +11,18 @@ function active(id: string, dueAt = "2026-09-23T20:00:00.000Z"): StudyCard {
 }
 
 describe("manual queue schedule", () => {
+  it.each([
+    ["2026-03-28T23:30:00.000Z", "Europe/Berlin", "2026-03-29", "2026-04-11"],
+    ["2026-10-24T22:30:00.000Z", "Europe/Berlin", "2026-10-25", "2026-11-07"],
+    ["2026-12-31T20:00:00.000Z", "Asia/Kolkata", "2027-01-01", "2027-01-14"],
+    ["2024-02-28T20:00:00.000Z", "Asia/Kolkata", "2024-02-29", "2024-03-13"],
+  ])("keeps fourteen unique local days across DST, leap days, and years (%s)", (instant, timezone, first, last) => {
+    const result = buildScheduleAgenda({ cards: [], logs: [], now: new Date(instant), timezone });
+    expect(result.days).toHaveLength(14);
+    expect(new Set(result.days.map((day) => day.dateKey)).size).toBe(14);
+    expect(result.days[0].dateKey).toBe(first);
+    expect(result.days.at(-1)?.dateKey).toBe(last);
+  });
   it("shows a review due later today from the start of the user local day", () => {
     const now = new Date("2026-09-23T07:00:00.000Z");
     expect(isDueOnOrBeforeLocalDay("2026-09-23T20:00:00.000Z", now, "UTC")).toBe(true);

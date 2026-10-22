@@ -4,7 +4,8 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  fullyParallel: true,
+  // Files may run concurrently, but journeys sharing a member fixture cannot.
+  fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   workers: process.env.CI ? 2 : undefined,
@@ -19,12 +20,15 @@ export default defineConfig({
     channel: process.env.CI ? undefined : "msedge",
   },
   projects: [
-    { name: "public" },
-    { name: "member", use: { storageState: ".playwright/auth/member.json" } },
-    { name: "admin", use: { storageState: ".playwright/auth/admin.json" } },
-    { name: "disabled", use: { storageState: ".playwright/auth/disabled.json" } },
+    { name: "public", testMatch: "public.spec.ts" },
+    { name: "member", testMatch: "member-workflow.spec.ts", use: { storageState: ".playwright/auth/member.json" } },
+    { name: "admin", testMatch: "admin.spec.ts", use: { storageState: ".playwright/auth/admin.json" } },
+    { name: "disabled", testMatch: "access-and-responsive.spec.ts", grep: /disabled membership/, use: { storageState: ".playwright/auth/disabled.json" } },
+    { name: "onboarding", testMatch: "onboarding.spec.ts", use: { storageState: ".playwright/auth/onboarding.json" } },
     {
       name: "mobile",
+      testMatch: "access-and-responsive.spec.ts",
+      grep: /mobile navigation/,
       use: {
         ...devices["iPhone 13"],
         // Keep mobile emulation on the same locally installed Chromium
@@ -37,7 +41,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: process.env.CI ? "npm run build && npm run start" : "npm run dev",
+    command: process.env.CI || process.env.E2E_PRODUCTION === "true" ? "npm run build && npm run start" : "npm run dev",
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

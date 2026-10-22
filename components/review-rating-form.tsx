@@ -15,14 +15,18 @@ export function ReviewRatingForm({ problemId, options, onComplete, onConflict }:
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
   const requestIdRef = useRef<{ fingerprint: string; id: string } | null>(null);
+  const submittingRef = useRef(false);
 
   const submit = useCallback((rating: RatingOption["rating"]) => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setMessage(null);
     const normalizedNote = note.trim();
     const fingerprint = JSON.stringify([problemId.toLowerCase(), rating, normalizedNote]);
     if (requestIdRef.current?.fingerprint !== fingerprint) requestIdRef.current = { fingerprint, id: crypto.randomUUID() };
     const requestId = requestIdRef.current.id;
     startTransition(async () => {
+      try {
       const result = await submitReview({ problemId, rating, note: normalizedNote || undefined, requestId });
       if (!result.ok) {
         setMessage(result.error);
@@ -33,6 +37,11 @@ export function ReviewRatingForm({ problemId, options, onComplete, onConflict }:
       requestIdRef.current = null;
       setNote("");
       onComplete?.(result);
+      } catch {
+        setMessage("Could not reach the server. Your note is kept; choose the same rating to retry safely.");
+      } finally {
+        submittingRef.current = false;
+      }
     });
   }, [note, onComplete, onConflict, problemId]);
 

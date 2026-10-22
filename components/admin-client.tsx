@@ -23,6 +23,7 @@ export function AdminAccessManager({ initialInvites, timezone }: { initialInvite
         event.preventDefault();
         setMessage(null);
         startInviteTransition(async () => {
+          try {
           const result = await inviteUser(email);
           const nextMessage = result.ok ? result.message : result.error;
           setMessage(nextMessage);
@@ -30,6 +31,10 @@ export function AdminAccessManager({ initialInvites, timezone }: { initialInvite
           replaceInvite(result.invite);
           setEmail("");
           toast.success(nextMessage);
+          } catch {
+            setMessage("Could not reach the server. Try inviting this email again.");
+            toast.error("Could not reach the server. Try inviting this email again.");
+          }
         });
       }}>
         <Input aria-label="Google email" className="min-w-0 flex-1" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="friend@example.com" required />
@@ -54,10 +59,15 @@ function AccessRow({ invite, timezone, onChange }: { invite: AdminInviteRow; tim
       const optimistic = { ...invite, is_active: !invite.is_active };
       onChange(optimistic);
       startTransition(async () => {
+        try {
         const result = await setUserAccess(invite.email, optimistic.is_active);
         if (!result.ok) { onChange(previous); toast.error(result.error); return; }
         onChange(result.invite);
         toast.success(`${invite.email} access ${result.invite.is_active ? "restored" : "disabled"}.`);
+        } catch {
+          onChange(previous);
+          toast.error("Could not change access. Try again.");
+        }
       });
     }}>{pending ? <>Saving…</> : invite.is_active ? <><PauseCircle size={14} /> Disable</> : <><PlayCircle size={14} /> Restore</>}</Button>
   </div>;
