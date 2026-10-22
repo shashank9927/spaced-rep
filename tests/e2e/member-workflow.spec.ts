@@ -192,7 +192,7 @@ test("temporary save and Undo failures preserve safe retry state", async ({ page
 test("settings synchronizes profile and preserves cards when the catalog changes", async ({ page }) => {
   await page.goto("/settings");
   await page.getByLabel("Display name", { exact: true }).fill("Browser Member");
-  await page.getByLabel("Timezone", { exact: true }).selectOption("Asia/Kolkata");
+  await page.getByLabel(/^Timezone/).selectOption("Asia/Kolkata");
   await page.getByRole("button", { name: /NeetCode 250/ }).click();
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByText("Settings saved.", { exact: true })).toBeVisible();
@@ -200,7 +200,7 @@ test("settings synchronizes profile and preserves cards when the catalog changes
   await expect(page.getByText("Contains Duplicate", { exact: true })).toBeVisible();
   await page.goto("/settings");
   await expect(page.getByLabel("Display name", { exact: true })).toHaveValue("Browser Member");
-  await expect(page.getByLabel("Timezone", { exact: true })).toHaveValue("Asia/Kolkata");
+  await expect(page.getByLabel(/^Timezone/)).toHaveValue("Asia/Kolkata");
 });
 
 test("schedule exposes fourteen days and a synchronized month view", async ({ page }) => {

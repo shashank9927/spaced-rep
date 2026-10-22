@@ -15,5 +15,5 @@ test("onboarding saves a chosen name, timezone, and browsing catalog", async ({ 
   await expect(page.getByRole("heading", { name: "Today" })).toBeVisible();
   await page.goto("/settings");
   await expect(page.getByLabel("Display name", { exact: true })).toHaveValue("New Learner");
-  await expect(page.getByLabel("Timezone", { exact: true })).toHaveValue("Asia/Kolkata");
+  await expect(page.getByLabel(/^Timezone/)).toHaveValue("Asia/Kolkata");
 });
