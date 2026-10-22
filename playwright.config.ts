@@ -7,6 +7,7 @@ export default defineConfig({
   // Files may run concurrently, but journeys sharing a member fixture cannot.
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
+  failOnFlakyTests: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   workers: process.env.CI ? 2 : undefined,
   reporter: process.env.CI ? [["line"], ["html", { open: "never" }]] : "list",

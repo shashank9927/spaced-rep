@@ -68,7 +68,7 @@ export function AppShell({ children, controls, problem }: { children: ReactNode;
     <main className="mx-auto w-full max-w-[1280px] px-4 py-6 pb-24 sm:px-6 md:py-8 md:pb-12 lg:px-8">{children}</main>
     <nav className="fixed inset-x-2 bottom-[max(.5rem,env(safe-area-inset-bottom))] z-30 grid grid-cols-4 rounded-xl border border-border bg-card/94 p-1 shadow-2xl backdrop-blur-xl md:hidden" aria-label="Main navigation"><Suspense fallback={<NavigationFallback mobile />}><NavigationLinks mobile /></Suspense></nav>
     {problem}
-    <Toaster theme={theme} position="bottom-right" richColors closeButton />
+    <Toaster theme={theme} position="top-right" offset={{ top: "76px", right: "20px" }} mobileOffset={{ top: "76px", right: "12px", left: "12px" }} richColors closeButton />
   </div></ReviewUndoProvider></TooltipProvider>;
 }
 

@@ -207,6 +207,11 @@ test("temporary save and Undo failures preserve safe retry state", async ({ page
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   await expect(page.getByText(/Could not reach the server/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeVisible();
+  const undoBox = await page.getByRole("button", { name: "Undo", exact: true }).boundingBox();
+  const toastBox = await page.locator('[data-sonner-toast][data-type="error"]').boundingBox();
+  expect(undoBox).not.toBeNull();
+  expect(toastBox).not.toBeNull();
+  expect(undoBox!.y >= toastBox!.y + toastBox!.height || toastBox!.y >= undoBox!.y + undoBox!.height).toBe(true);
   await page.unroute("**/*", abortAction);
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Contains Duplicate" })).toBeVisible();
