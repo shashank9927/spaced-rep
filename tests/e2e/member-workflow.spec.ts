@@ -7,15 +7,15 @@ import { createClient } from "@supabase/supabase-js";
 const problemSearch = (page: import("@playwright/test").Page) =>
   page.locator("main input[placeholder='Filter by number, title, or pattern']:visible");
 
-async function seedMemberDueReview() {
-  await clearMemberProblem(217);
+async function seedMemberDueReview(leetcodeNumber = 217) {
+  await clearMemberProblem(leetcodeNumber);
   const url = process.env.E2E_SUPABASE_URL;
   const serviceKey = process.env.E2E_SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !serviceKey) return;
   const admin = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
   const users = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
   const member = users.data.users.find((user) => user.email === "member@recallcode.test");
-  const problem = await admin.from("problems").select("id").eq("leetcode_number", 217).single();
+  const problem = await admin.from("problems").select("id").eq("leetcode_number", leetcodeNumber).single();
   if (users.error || !member || problem.error || !problem.data) throw users.error ?? problem.error ?? new Error("Could not seed the due review.");
   const attemptedAt = new Date(Date.now() - 4 * 86_400_000).toISOString();
   const dueAt = new Date(Date.now() - 86_400_000).toISOString();
@@ -135,6 +135,29 @@ test("filters expose a clear recovery path", async ({ page }) => {
   await expect(page.getByText(/No problems match/)).toBeVisible();
   await page.getByRole("button", { name: "Reset all" }).click();
   await expect(page.getByText(/No problems match/)).toBeHidden();
+});
+
+test("skipping keeps notes attached to their problem and Undo restores queue position", async ({ page }) => {
+  await seedMemberDueReview(1);
+  await page.goto("/review");
+  await expect(page.getByRole("heading", { name: "2 reviews left" })).toBeVisible();
+  const firstTitle = await page.locator("main article h2").innerText();
+  await page.getByRole("button", { name: /Add a private note/ }).click();
+  await page.getByPlaceholder("What should future-you remember?").fill("Only for the first problem");
+  await page.getByRole("button", { name: "Skip for now" }).click();
+  await expect(page.locator("main article h2")).not.toHaveText(firstTitle);
+  await expect(page.getByPlaceholder("What should future-you remember?")).toHaveCount(0);
+  const secondTitle = await page.locator("main article h2").innerText();
+  await page.getByRole("button", { name: "Skip for now" }).click();
+  await expect(page.locator("main article h2")).toHaveText(firstTitle);
+  await expect(page.getByPlaceholder("What should future-you remember?")).toHaveValue("Only for the first problem");
+  await page.getByRole("button", { name: "Skip for now" }).click();
+  await page.keyboard.press("3");
+  await expect(page.getByText("Review saved", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(page.locator("main article h2")).toHaveText(secondTitle);
+  await page.getByRole("button", { name: "Skip for now" }).click();
+  await expect(page.locator("main article h2")).toHaveText(firstTitle);
 });
 
 for (const rating of ["Forgot", "Hard", "Good", "Easy"]) {

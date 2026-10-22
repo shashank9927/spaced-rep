@@ -27,6 +27,7 @@ for (const [width, height] of [[1440, 900], [1024, 768], [768, 1024], [390, 844]
       for (const [route, heading] of [["/today", "Today"], ["/problems", "Problems"], ["/schedule", "Schedule"], ["/progress", "Progress"]]) {
         await page.goto(route);
         await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
+        await expect(page.getByRole("button", { name: "Search problems", exact: true })).toBeVisible();
         await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), route).toBe(true);
       }

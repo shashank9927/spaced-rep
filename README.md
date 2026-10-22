@@ -4,7 +4,9 @@ A small, invite-only spaced-repetition tracker for NeetCode practice problems.
 
 ## Run locally
 
-1. Create a Supabase project, then apply **every** SQL migration in `supabase/migrations` in ascending filename order. On a fresh project this includes the greenfield schema, security, workflow, and review-result RPC migrations. The `0004` migration resets only the public application schema; it deliberately leaves Supabase Auth and Google OAuth intact.
+Use Node.js 22.12 or newer.
+
+1. For a **new, empty** Supabase project, apply every SQL migration in `supabase/migrations` in ascending filename order. For an existing project, apply only migrations that have not already been applied. Never replay `0004` against a database with user data: it resets the public application schema.
 2. Create a Google OAuth Web client. Add `https://<your-project-ref>.supabase.co/auth/v1/callback` as its authorized redirect URI, then put its client ID and secret in Supabase under Authentication > Providers > Google.
 3. Copy `.env.example` to `.env.local` and fill in the values. Use a lowercase value for `BOOTSTRAP_ADMIN_EMAIL`.
 4. In Supabase Authentication > URL Configuration, add `http://localhost:3000/auth/callback` and the production callback URL.
@@ -26,15 +28,19 @@ For the Germany/India study group, create the Supabase project in **Central EU (
 
 Keep the former project until the new production deployment is verified. Never commit `.env.local` or a service-role key.
 
-## Greenfield reset
+## Existing deployment upgrades
 
-If this project already has the older RecallCode schema, open Supabase **SQL Editor**, paste the full contents of [0004_greenfield_rebuild.sql](<supabase/migrations/0004_greenfield_rebuild.sql>), and choose **Run**. Then apply the remaining migrations in ascending order and run `npm run catalog:import`. The imported snapshot restores the three catalogs; sign in using `BOOTSTRAP_ADMIN_EMAIL` to bootstrap the owner and invite friends again.
+Preserve the production database. Check the applied migration history and run only missing, additive migrations. The latest [0014_review_serialization.sql](<supabase/migrations/0014_review_serialization.sql>) serializes competing review/Undo transactions without deleting cards, events, invitations, or profiles. A Git push deploys application code but does not apply database migrations automatically.
+
+The historical `0004_greenfield_rebuild.sql` is destructive and is retained only to reproduce a fresh database in CI. It is not a deployment-upgrade or troubleshooting step. Members can restart their own learning history using the typed-`RESET` confirmation in Settings; this never resets the shared catalog or other accounts.
 
 ## Checks
 
 Run `npx tsc --noEmit`, `npm run lint`, `npm run test:unit`, `npm audit --audit-level=moderate`, and `npm run build` before deploying.
 
 `npm run test:e2e -- --project=public` uses the installed Microsoft Edge browser and does not touch Supabase data. The complete authenticated browser and database suites run in GitHub Actions against a disposable local Supabase stack; they never use deployment credentials or production data. Developers who already have Docker and the Supabase CLI can run the same database checks with `supabase db start` followed by `npm run test:db`.
+
+Authenticated browser fixtures require explicit `E2E_SUPABASE_URL`, `E2E_SUPABASE_ANON_KEY`, and `E2E_SUPABASE_SERVICE_ROLE_KEY` values for a disposable loopback stack, plus a loopback `PLAYWRIGHT_BASE_URL`. Point the app's Supabase environment variables at that same stack. `npm run test:db:api` verifies real concurrent API calls, RLS isolation, Undo, and reset there. CI fails if authenticated configuration is missing; it never substitutes production credentials. Reports, traces, screenshots, and database diagnostics are retained as workflow artifacts.
 
 Real Google OAuth is intentionally verified with one manual production smoke test. Automated browser tests seed isolated Google-shaped test identities without adding an authentication bypass to the application.
 

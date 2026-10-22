@@ -73,7 +73,7 @@ export function AppShell({ children, controls, problem }: { children: ReactNode;
 }
 
 export function ShellControlsSkeleton() {
-  return <div aria-label="Loading account controls" className="flex items-center gap-1.5"><span className="hidden h-8 w-18 animate-pulse rounded-md bg-muted sm:block" /><span className="h-9 w-9 animate-pulse rounded-md bg-muted sm:w-48 lg:w-64" /><span className="size-8 animate-pulse rounded-md bg-muted" /></div>;
+  return <div aria-label="Loading account controls" className="flex items-center gap-1.5"><span className="h-10 w-10 shrink-0 animate-pulse rounded-md bg-muted sm:w-48 md:w-10 lg:w-64" /><span className="size-10 shrink-0 animate-pulse rounded-md bg-muted" /></div>;
 }
 
 export function EmptyState({ title, body, action }: { title: string; body: string; action?: ReactNode }) { return <Empty icon={<Code2 size={26} />} title={title} description={body} action={action} />; }
