@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const state = vi.hoisted(() => ({ logs: [] as any[], cards: [] as any[] }));
+const state = vi.hoisted(() => ({ logs: [] as any[], cards: [] as any[], catalog: [] as any[] }));
 vi.mock("server-only", () => ({}));
 vi.mock("react", () => ({ cache: (fn: unknown) => fn }));
 vi.mock("next/server", () => ({ connection: async () => {} }));
@@ -9,7 +9,7 @@ vi.mock("@/lib/auth", () => ({ getProfile: async () => ({ id: "member", timezone
 vi.mock("@/lib/performance", () => ({ measure: (_: string, fn: () => unknown) => fn() }));
 vi.mock("@/lib/supabase/server", () => {
   function from(table: string) {
-    let rows = [...(table === "review_logs" ? state.logs : state.cards)];
+    let rows = [...(table === "review_logs" ? state.logs : table === "catalog_problems" ? state.catalog : state.cards)];
     let start = 0, count = 1000;
     const query: any = {
       select: () => query,
@@ -32,7 +32,7 @@ vi.mock("@/lib/supabase/server", () => {
   return { createClient: async () => ({ from }), createAdminClient: () => ({ from }) };
 });
 
-import { getProblemHistoryPage, getScheduleAgendaData } from "@/lib/queries";
+import { getProblemHistoryPage, getScheduleAgendaData, getTodayData, getCatalogProblems } from "@/lib/queries";
 import { decodeHistoryCursor, encodeHistoryCursor, readAllPages } from "@/lib/pagination";
 const problemId = "00000000-0000-4000-8000-000000000001";
 function logs(count: number, reversedCount = 0) {
@@ -45,8 +45,25 @@ function logs(count: number, reversedCount = 0) {
   }));
 }
 
-beforeEach(() => { state.logs = []; state.cards = []; });
+beforeEach(() => { state.logs = []; state.cards = []; state.catalog = []; });
 describe("query pagination against Supabase row limits", () => {
+  it("counts only the selected catalog while keeping other cards active", async () => {
+    const problem = { id: problemId, source_id: "1-two-sum", leetcode_number: 1, title: "Two Sum", difficulty: "Easy", problem_topics: [] };
+    state.catalog = [{ catalog_slug: "neetcode150", sort_order: 0, problems: problem }];
+    state.cards = [{ problem_id: problemId, due_at: "2000-01-01T00:00:00Z", reps: 1, lapses: 0, scheduled_days: 3 }, { problem_id: "outside-selected-catalog", due_at: "2000-01-01T00:00:00Z", reps: 1, lapses: 0, scheduled_days: 3 }];
+    const result = await getCatalogProblems("neetcode150");
+    expect(result).toMatchObject({ activeCount: 1, dueCount: 1 });
+    expect(result.problems).toHaveLength(1);
+    expect(result.problems[0]).not.toHaveProperty("stability");
+    expect(result.problems[0]).not.toHaveProperty("leetcode_url");
+  });
+  it("does not cap the user's due queue at 1000 cards", async () => {
+    state.cards = Array.from({ length: 1201 }, (_, index) => ({ problem_id: String(index), due_at: "2026-01-01T12:00:00.000Z", last_review_at: "2025-12-29T12:00:00.000Z", first_attempted_at: "2025-12-29T12:00:00.000Z", stability: 3, difficulty: 5, elapsed_days: 0, scheduled_days: 3, learning_steps: 0, reps: 1, lapses: 0, state: 2, version: 1, last_rating: "good", problems: { id: String(index), source_id: `${index + 1}-sample`, leetcode_number: index + 1, title: "Sample", difficulty: "Easy", problem_topics: [] } }));
+    const result = await getTodayData();
+    expect(result?.activeProblemCount).toBe(1201);
+    expect(result?.dueReviews).toHaveLength(1201);
+    expect(result?.upcomingReviews).toHaveLength(0);
+  });
   it("validates opaque cursors before constructing a database filter", () => {
     expect(decodeHistoryCursor(encodeHistoryCursor({ reviewed_at: "2026-10-01T12:00:00.123456+00:00", id: problemId }))).toEqual({ reviewedAt: "2026-10-01T12:00:00.123456+00:00", id: problemId });
     expect(() => decodeHistoryCursor("v1." + Buffer.from(JSON.stringify({ reviewedAt: "bad),id.gt.0", id: problemId })).toString("base64url"))).toThrow();

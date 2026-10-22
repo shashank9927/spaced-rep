@@ -160,6 +160,11 @@ for (const rating of ["Forgot", "Hard", "Good", "Easy"]) {
 }
 
 test("temporary save and Undo failures preserve safe retry state", async ({ page }) => {
+  const requestIds: string[] = [];
+  page.on("request", (request) => {
+    const match = request.postData()?.match(/"requestId":"([a-f0-9-]+)"/i);
+    if (match) requestIds.push(match[1]);
+  });
   await page.goto("/today");
   await page.locator("main a[href^='/review?problem=']:visible").first().click();
   await expect(page.getByRole("heading", { name: "Contains Duplicate" })).toBeVisible();
@@ -173,6 +178,8 @@ test("temporary save and Undo failures preserve safe retry state", async ({ page
   await page.unroute("**/*", abortAction);
   await page.keyboard.press("3");
   await expect(page.getByText("Review saved", { exact: true })).toBeVisible();
+  expect(requestIds).toHaveLength(2);
+  expect(requestIds[0]).toBe(requestIds[1]);
   await page.route("**/*", abortAction);
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   await expect(page.getByText(/Could not reach the server/)).toBeVisible();

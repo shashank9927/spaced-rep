@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createClient } from "@supabase/supabase-js";
+import { execFileSync } from "node:child_process";
 
 // Do not load .env.local: these credentials must come from a disposable stack.
 const url = process.env.E2E_SUPABASE_URL;
@@ -88,4 +89,12 @@ ok(await admin.rpc("reset_study_progress_service", { p_user_id: member.id }));
 for (const table of ["user_problem_cards", "review_logs", "review_reversals"]) assert.equal(ok(await admin.from(table).select("*").eq("user_id", member.id)).length, 0);
 assert.deepEqual(await card(other), otherCard);
 assert.deepEqual(ok(await admin.from("profiles").select("*").eq("id", member.id).single()), profile);
+// A repeat catalog import must preserve stable IDs and existing user cards.
+const idsBefore = ok(await admin.from("problems").select("id,source_id").order("source_id"));
+execFileSync(process.execPath, ["scripts/import-catalog.mjs"], {
+  env: { ...process.env, NEXT_PUBLIC_SUPABASE_URL: url, SUPABASE_SERVICE_ROLE_KEY: key },
+  stdio: "inherit",
+});
+assert.deepEqual(ok(await admin.from("problems").select("id,source_id").order("source_id")), idsBefore);
+assert.deepEqual(await card(other), otherCard);
 console.log("PASS: concurrency, idempotency, stale versions, exact Undo, expiry, reversals, disabled access, RLS, admin privacy, and personal reset.");
