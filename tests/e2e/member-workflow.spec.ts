@@ -238,3 +238,24 @@ test("personal reset clears study data but keeps the account", async ({ page }) 
   await expect(page.getByRole("heading", { name: "Review load" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Scheduled review outcomes" })).toHaveCount(0);
 });
+
+test("history paginates tied timestamps after 130 reversed events", async ({ page }) => {
+  const admin = createClient(process.env.E2E_SUPABASE_URL!, process.env.E2E_SUPABASE_SERVICE_ROLE_KEY!);
+  const { data: member, error: memberError } = await admin.from("profiles").select("id").eq("email", "member@recallcode.test").single();
+  const { data: problem, error: problemError } = await admin.from("problems").select("id").eq("leetcode_number", 217).single();
+  if (memberError || problemError || !member || !problem) throw memberError ?? problemError ?? new Error("History fixture unavailable.");
+  const prefix = crypto.randomUUID().slice(0, 8);
+  const timestamp = new Date().toISOString();
+  const entries = Array.from({ length: 155 }, (_, index) => ({ id: `${prefix}-0000-4000-8000-${String(1000 - index).padStart(12, "0")}`, user_id: member.id, problem_id: problem.id, request_id: crypto.randomUUID(), rating: "good", reviewed_at: timestamp, note: `history-note-${index}`, previous_due_at: timestamp, next_due_at: new Date(Date.now() + 86400000).toISOString(), scheduled_days: 1, scheduler_version: "e2e-history", event_kind: "scheduled_review", result_version: 1 }));
+  const inserted = await admin.from("review_logs").insert(entries);
+  if (inserted.error) throw inserted.error;
+  const reversed = await admin.from("review_reversals").insert(entries.slice(0, 130).map((entry) => ({ user_id: member.id, review_log_id: entry.id })));
+  if (reversed.error) throw reversed.error;
+  await page.goto(`/problems/${problem.id}`);
+  await expect(page.getByText("20 loaded", { exact: true })).toBeVisible();
+  await expect(page.getByText("history-note-0", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Load older" }).click();
+  await expect(page.getByText("25 loaded", { exact: true })).toBeVisible();
+  await expect(page.getByText("history-note-154", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Load older" })).toHaveCount(0);
+});

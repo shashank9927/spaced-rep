@@ -60,6 +60,21 @@ export default async function globalSetup() {
   if (cardError) throw cardError;
   const { error: logError } = await admin.from("review_logs").insert({ user_id: memberId, problem_id: dueProblem.id, request_id: crypto.randomUUID(), rating: "good", reviewed_at: attemptedAt, previous_due_at: null, next_due_at: dueAt, scheduled_days: 3, scheduler_version: "e2e-seed", event_kind: "first_attempt", previous_card_state: null, result_card_state: card, result_version: 1 });
   if (logError) throw logError;
+
+  // A separate member owns populated Progress fixtures used by visual tests.
+  const mobileId = userIds.get("mobile@recallcode.test")!;
+  const now = Date.now();
+  const reviewed = new Date(now - 86_400_000).toISOString();
+  const firstAttempt = new Date(now - 21 * 86_400_000).toISOString();
+  const mobileCard = { ...card, first_attempted_at: firstAttempt, due_at: new Date(now + 86_400_000).toISOString(), last_review_at: reviewed, scheduled_days: 2, reps: 21, lapses: 5, version: 21 };
+  const mobileInsert = await admin.from("user_problem_cards").insert({ user_id: mobileId, problem_id: dueProblem.id, ...mobileCard });
+  if (mobileInsert.error) throw mobileInsert.error;
+  const mobileLogs = Array.from({ length: 21 }, (_, index) => {
+    const timestamp = new Date(now - (21 - index) * 86_400_000).toISOString();
+    return { user_id: mobileId, problem_id: dueProblem.id, request_id: crypto.randomUUID(), rating: index && index % 4 === 1 ? "again" : "good", reviewed_at: timestamp, previous_due_at: index ? timestamp : null, next_due_at: index === 20 ? mobileCard.due_at : new Date(Date.parse(timestamp) + 86_400_000).toISOString(), scheduled_days: index === 20 ? 2 : 1, scheduler_version: "e2e-seed", event_kind: index ? "scheduled_review" : "first_attempt", result_version: index + 1 };
+  });
+  const mobileLogInsert = await admin.from("review_logs").insert(mobileLogs);
+  if (mobileLogInsert.error) throw mobileLogInsert.error;
 }
 
 async function sessionCookies(url: string, anonKey: string, email: string, password: string) {

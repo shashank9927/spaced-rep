@@ -2,10 +2,33 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { leetcodeNumberFromSourceId } from "@/lib/utils";
+import { validateCatalogSnapshot } from "../scripts/catalog-schema.mjs";
 
 const snapshot = JSON.parse(readFileSync(resolve(process.cwd(), "data/catalog.snapshot.json"), "utf8"));
 
 describe("catalog snapshot", () => {
+  it("rejects missing primary topics and duplicate official ordering before importing", () => {
+    const noTopic = structuredClone(snapshot);
+    noTopic.problems[0].topics = [];
+    expect(() => validateCatalogSnapshot(noTopic)).toThrow();
+    const duplicatedOrder = structuredClone(snapshot);
+    const [first, second] = duplicatedOrder.problems.filter((problem: any) => problem.catalogs.includes("neetcode150"));
+    second.catalogOrder.neetcode150 = first.catalogOrder.neetcode150;
+    expect(() => validateCatalogSnapshot(duplicatedOrder)).toThrow();
+  });
+  it("rejects duplicate IDs, duplicate problem numbers, malformed source IDs, and unsafe hosts", () => {
+    for (const mutate of [
+      (copy: any) => { copy.problems[1].sourceId = copy.problems[0].sourceId; },
+      (copy: any) => { copy.problems[1].sourceId = copy.problems[0].sourceId.split("-")[0] + "-different-name"; },
+      (copy: any) => { copy.problems[0].sourceId = "missing-number"; },
+      (copy: any) => { copy.problems[0].leetcodeUrl = "https://leetcode.com.attacker.test/problem"; },
+      (copy: any) => { copy.sourceUrl = "https://untrusted.example/catalog"; },
+    ]) {
+      const copy = structuredClone(snapshot);
+      mutate(copy);
+      expect(() => validateCatalogSnapshot(copy)).toThrow();
+    }
+  });
   it("contains stable unique problem metadata", () => {
     const ids = snapshot.problems.map((problem: { sourceId: string }) => problem.sourceId);
     expect(new Set(ids).size).toBe(ids.length);

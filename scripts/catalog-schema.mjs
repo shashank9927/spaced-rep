@@ -9,7 +9,7 @@ export const catalogProblemSchema = z.object({
   slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(160),
   title: z.string().trim().min(1).max(200),
   difficulty: z.enum(["Easy", "Medium", "Hard"]),
-  topics: z.array(z.string().trim().min(1).max(80)).max(12),
+  topics: z.array(z.string().trim().min(1).max(80)).min(1).max(12),
   leetcodeUrl: httpsUrl.nullable(),
   neetcodeUrl: httpsUrl.nullable(),
   catalogs: z.array(z.enum(catalogIds)).min(1).max(3).refine((values) => new Set(values).size === values.length),
@@ -33,6 +33,7 @@ export function validateCatalogSnapshot(value) {
   }
   const ids = new Set();
   const numbers = new Set();
+  const orders = new Map(catalogIds.map((catalog) => [catalog, new Set()]));
   for (const problem of snapshot.problems) {
     if (ids.has(problem.sourceId)) throw new Error(`Duplicate catalog source ID: ${problem.sourceId}`);
     ids.add(problem.sourceId);
@@ -42,6 +43,8 @@ export function validateCatalogSnapshot(value) {
     numbers.add(number);
     for (const catalog of problem.catalogs) {
       if (!Number.isInteger(problem.catalogOrder[catalog]) || problem.catalogOrder[catalog] < 0) throw new Error(`Missing ${catalog} order for ${problem.sourceId}`);
+      if (orders.get(catalog).has(problem.catalogOrder[catalog])) throw new Error(`Duplicate ${catalog} order for ${problem.sourceId}`);
+      orders.get(catalog).add(problem.catalogOrder[catalog]);
     }
     if (problem.leetcodeUrl) {
       const hostname = new URL(problem.leetcodeUrl).hostname;
